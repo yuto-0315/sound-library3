@@ -1,0 +1,13 @@
+{
+  "files": {
+    "main.css": "/sound-library2/static/css/main.2e8a2049.css",
+    "main.js": "/sound-library2/static/js/main.6d00d0a1.js",
+    "index.html": "/sound-library2/index.html",
+    "main.2e8a2049.css.map": "/sound-library2/static/css/main.2e8a2049.css.map",
+    "main.6d00d0a1.js.map": "/sound-library2/static/js/main.6d00d0a1.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.2e8a2049.css",
+    "static/js/main.6d00d0a1.js"
+  ]
+}

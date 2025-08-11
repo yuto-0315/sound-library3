@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5" />
+    <meta name="theme-color" content="#2196F3" />
+    <meta
+      name="description"
+      content="小学校における音楽づくりの支援教材。音の録音、管理、音楽作成機能を提供する教育用Webアプリケーション"
+    />
+    <meta name="keywords" content="音楽教育,小学校,音楽づくり,録音,DAW,アクセシビリティ" />
+    <meta name="author" content="音楽づくり支援アプリ開発チーム" />
+    
+    <!-- アクセシビリティ関連のメタタグ -->
+    <meta name="color-scheme" content="light" />
+    
+    <!-- タッチ・視覚障害者対応 -->
+    <link rel="apple-touch-icon" href="%PUBLIC_URL%/logo192.png" />
+    <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
+    
+    <!-- フォーカス可視化のためのCSS -->
+    <style>
+      /* フォーカス可視化の基本スタイル */
+      *:focus {
+        outline: 2px solid #0066CC !important;
+        outline-offset: 1px !important;
+      }
+      
+      /* スキップリンク */
+      .skip-link {
+        position: absolute;
+        top: -40px;
+        left: 6px;
+        background: #000;
+        color: #fff;
+        padding: 8px 12px;
+        text-decoration: none;
+        z-index: 1000;
+        border-radius: 4px;
+        font-size: 14px;
+        font-weight: 600;
+      }
+      
+      .skip-link:focus {
+        top: 6px;
+      }
+      
+      /* プリファースされたモーション設定の考慮 */
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after {
+          animation-duration: 0.01ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 0.01ms !important;
+        }
+      }
+    </style>
+    
+    <title>音楽づくり支援アプリ - アクセシブル音楽教育ツール</title>
+  </head>
+  <body>
+    <noscript>
+      <div style="padding: 20px; text-align: center; font-family: sans-serif;">
+        <h1>JavaScriptが無効になっています</h1>
+        <p>このアプリケーションを使用するには、JavaScriptを有効にしてください。</p>
+        <p>ブラウザの設定でJavaScriptを有効にする方法については、お使いのブラウザのヘルプをご確認ください。</p>
+      </div>
+    </noscript>
+    
+    <!-- スキップリンク -->
+    <a href="#main-content" class="skip-link">メインコンテンツにスキップ</a>
+    
+    <div id="root"></div>
+  </body>
+</html>

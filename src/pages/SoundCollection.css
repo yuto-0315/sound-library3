@@ -1,0 +1,648 @@
+/* アクセシビリティユーティリティのインポート */
+@import '../utils/accessibility.css';
+
+.sound-collection {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding-bottom: 40px;
+}
+
+.sound-collection h2 {
+  color: var(--text-color);
+  font-size: 28px;
+  margin-bottom: 10px;
+  line-height: 1.3;
+}
+
+.page-description {
+  font-size: 16px;
+  color: var(--text-secondary);
+  margin-bottom: 20px;
+  line-height: 1.5;
+}
+
+.collection-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  margin-bottom: 32px;
+}
+
+.recording-section, .upload-section {
+  text-align: center;
+  padding: 20px;
+}
+
+.recording-controls {
+  margin: 16px 0 20px 0;
+}
+
+.recording-section h3,
+.upload-section h3 {
+  margin-bottom: 16px;
+  font-size: 20px;
+  color: var(--text-color);
+}
+
+/* アクセシブルボタンスタイル */
+.accessible-button.record-btn,
+.accessible-button.button-primary.record-btn {
+  background: linear-gradient(135deg, var(--warning-color), var(--warning-hover));
+  color: white;
+  font-size: 16px;
+  min-width: 180px;
+  min-height: 48px;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  font-weight: 600;
+  padding: 12px 24px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  text-decoration: none;
+}
+
+.accessible-button.record-btn:hover,
+.accessible-button.button-primary.record-btn:hover {
+  background: linear-gradient(135deg, var(--warning-hover), #B91C1C);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.3);
+}
+
+.accessible-button.record-btn:focus,
+.accessible-button.button-primary.record-btn:focus {
+  outline: 2px solid var(--focus-color);
+  outline-offset: 2px;
+  border-color: #fff;
+  background: linear-gradient(135deg, var(--warning-hover), #B91C1C);
+}
+
+.accessible-button.record-btn:active,
+.accessible-button.button-primary.record-btn:active {
+  transform: translateY(0);
+  background: linear-gradient(135deg, #B91C1C, #991B1B);
+}
+
+/* SoundCollectionページ専用の録音停止ボタンスタイル */
+.sound-collection .accessible-button.stop-btn,
+.sound-collection .accessible-button.button-secondary.stop-btn {
+  background: linear-gradient(135deg, var(--safe-orange), var(--secondary-hover)) !important;
+  color: white !important;
+  font-size: 16px !important;
+  min-width: 180px !important;
+  min-height: 48px !important;
+  width: auto !important;
+  height: auto !important;
+  max-width: none !important;
+  max-height: none !important;
+  border: 2px solid transparent !important;
+  border-radius: 8px !important;
+  font-weight: 600;
+  padding: 12px 24px !important;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 8px;
+  text-decoration: none;
+  flex-shrink: 1 !important;
+  flex-grow: 0 !important;
+}
+
+.sound-collection .accessible-button.stop-btn:hover,
+.sound-collection .accessible-button.button-secondary.stop-btn:hover {
+  background: linear-gradient(135deg, var(--secondary-hover), #E67300) !important;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(255, 140, 0, 0.3);
+}
+
+.sound-collection .accessible-button.stop-btn:focus,
+.sound-collection .accessible-button.button-secondary.stop-btn:focus {
+  outline: 2px solid var(--focus-color);
+  outline-offset: 2px;
+  border-color: #fff;
+  background: linear-gradient(135deg, var(--secondary-hover), #E67300) !important;
+}
+
+.sound-collection .accessible-button.stop-btn:active,
+.sound-collection .accessible-button.button-secondary.stop-btn:active {
+  transform: translateY(0);
+  background: linear-gradient(135deg, #E67300, #D85F00) !important;
+}
+
+/* アップロードボタン */
+.upload-section .accessible-button {
+  background: linear-gradient(135deg, var(--safe-blue), var(--primary-hover));
+  color: white;
+  font-size: 16px;
+  min-width: 180px;
+  min-height: 48px;
+  border: 2px solid transparent;
+  font-weight: 600;
+  padding: 12px 24px;
+}
+
+.upload-section .accessible-button:hover {
+  background: linear-gradient(135deg, var(--primary-hover), #0052A3);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 102, 204, 0.3);
+}
+
+.upload-section .accessible-button:focus {
+  outline: 2px solid #0066CC;
+  outline-offset: 2px;
+  border-color: #fff;
+  background: linear-gradient(135deg, #1976D2, #1565C0);
+}
+
+/* 録音状態の表示 */
+.recording-status {
+  background: #fff;
+  border: 2px solid #ff4757;
+  border-radius: 12px;
+  padding: 20px;
+  margin-top: 16px;
+  box-shadow: 0 4px 12px rgba(255, 71, 87, 0.15);
+}
+
+.recording-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: #ff4757;
+  font-weight: bold;
+  font-size: 18px;
+  margin-bottom: 10px;
+  padding: 10px;
+  background: rgba(255, 71, 87, 0.1);
+  border-radius: 8px;
+  border: 2px solid rgba(255, 71, 87, 0.3);
+}
+
+.pulse-dot {
+  width: 14px;
+  height: 14px;
+  background: #ff4757;
+  border-radius: 50%;
+  animation: pulse 1.2s infinite;
+  box-shadow: 0 0 8px rgba(255, 71, 87, 0.5);
+}
+
+@keyframes pulse {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.5);
+    opacity: 0.5;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.recording-editor {
+  margin: 30px 0;
+  border: 3px solid var(--accent-color);
+  position: relative;
+  background: #fff;
+}
+
+.recording-editor::before {
+  content: '';
+  position: absolute;
+  top: -3px;
+  left: -3px;
+  right: -3px;
+  bottom: -3px;
+  background: linear-gradient(45deg, var(--accent-color), var(--primary-color));
+  border-radius: inherit;
+  z-index: -1;
+}
+
+.audio-preview {
+  width: 100%;
+  margin: 15px 0;
+}
+
+.form-group {
+  margin-bottom: 24px;
+  text-align: left;
+}
+
+.form-group label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: var(--text-color);
+  font-size: 16px;
+}
+
+.required-label .required {
+  color: #dc3545;
+  font-weight: bold;
+}
+
+.optional {
+  color: var(--text-secondary);
+  font-weight: normal;
+  font-size: 14px;
+}
+
+.help-text {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+  line-height: 1.4;
+}
+
+.validation-message {
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-size: 14px;
+  background: #e3f2fd;
+  color: #1976d2;
+  border: 1px solid #2196f3;
+}
+
+.sound-name-input {
+  width: 100%;
+  padding: 12px;
+  border: 2px solid var(--border-color);
+  border-radius: 8px;
+  font-size: 16px;
+  transition: border-color 0.2s ease;
+}
+
+.sound-name-input:focus {
+  outline: none;
+  border-color: var(--accent-color);
+}
+
+.tag-input-container {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.tag-input {
+  flex: 1;
+}
+
+.add-tag-btn {
+  min-width: 80px;
+  white-space: nowrap;
+}
+
+.tags-display {
+  margin-top: 12px;
+}
+
+.tags-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: var(--text-color);
+}
+
+.tags-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tag-item {
+  display: inline-block;
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--accent-color);
+  color: white;
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.tag.small {
+  font-size: 12px;
+  padding: 4px 8px;
+}
+
+.remove-tag {
+  background: none;
+  border: none;
+  color: white;
+  font-size: 16px;
+  font-weight: bold;
+  cursor: pointer;
+  padding: 0;
+  margin-left: 4px;
+  border-radius: 50%;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.2s ease;
+}
+
+.remove-tag:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.remove-tag:focus {
+  outline: 2px solid #fff;
+  outline-offset: 1px;
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* 録音リスト */
+.recent-recordings {
+  margin-top: 40px;
+}
+
+.recent-recordings h3 {
+  color: var(--text-color);
+  font-size: 24px;
+  margin-bottom: 20px;
+}
+
+.no-recordings {
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 16px;
+  padding: 40px 20px;
+  background: #f8f9fa;
+  border-radius: 12px;
+  border: 2px dashed #dee2e6;
+}
+
+.recordings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 20px;
+  margin-top: 20px;
+}
+
+/* サウンドカード */
+.sound-card {
+  background: white;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  border: 1px solid #e0e0e0;
+  transition: all 0.2s ease;
+}
+
+.sound-card:hover {
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
+  transform: translateY(-2px);
+}
+
+.sound-card:focus-within {
+  outline: 3px solid var(--focus-color);
+  outline-offset: 2px;
+}
+
+.sound-info {
+  margin-bottom: 15px;
+}
+
+.sound-name {
+  color: var(--text-color);
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0 0 8px 0;
+  line-height: 1.3;
+}
+
+.sound-date {
+  color: var(--text-secondary);
+  font-size: 14px;
+  margin: 0 0 8px 0;
+}
+
+.sound-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.sound-player {
+  text-align: center;
+}
+
+/* エディターアクション */
+.editor-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  margin-top: 20px;
+  flex-wrap: wrap;
+}
+
+/* 大きめのボタン */
+.large-button {
+  min-height: 50px;
+  min-width: 160px;
+  font-size: 16px;
+  font-weight: 600;
+  border-radius: 8px;
+  padding: 12px 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+/* iOS向けの通知スタイル */
+.ios-notice {
+  background: #E3F2FD;
+  border: 2px solid #2196F3;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.ios-notice p {
+  margin: 0 0 8px 0;
+}
+
+.ios-notice p:last-child {
+  margin-bottom: 0;
+}
+
+.ios-notice strong {
+  color: #1976D2;
+  font-weight: 600;
+}
+
+/* レスポンシブデザイン */
+@media (max-width: 1024px) {
+  .collection-actions {
+    grid-template-columns: 1fr;
+    gap: 15px;
+  }
+  
+  .recordings-grid {
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 15px;
+  }
+  
+  .sound-collection h2 {
+    font-size: 24px;
+  }
+}
+
+@media (max-width: 768px) {
+  .sound-collection {
+    padding: 0 10px 20px;
+  }
+  
+  .recordings-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  
+  .large-button {
+    min-width: 140px;
+    font-size: 14px;
+  }
+  
+  .sound-collection .accessible-button.record-btn, 
+  .sound-collection .accessible-button.stop-btn {
+    font-size: 16px !important;
+    min-width: 160px !important;
+    min-height: 48px !important;
+    padding: 12px 20px !important;
+    width: auto !important;
+    height: auto !important;
+    border-radius: 8px !important;
+  }
+  
+  .tag-input-container {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  .add-tag-btn {
+    min-width: auto;
+  }
+  
+  .editor-actions {
+    flex-direction: column;
+    align-items: center;
+  }
+  
+  .editor-actions button {
+    width: 100%;
+    max-width: 200px;
+  }
+}
+
+@media (max-width: 480px) {
+  .sound-collection h2 {
+    font-size: 20px;
+  }
+  
+  .recording-section, .upload-section {
+    padding: 15px;
+  }
+  
+  .sound-card {
+    padding: 15px;
+  }
+  
+  .large-button {
+    min-width: 120px;
+    font-size: 14px;
+    padding: 10px 16px;
+  }
+  
+  .sound-collection .accessible-button.record-btn, 
+  .sound-collection .accessible-button.stop-btn {
+    min-width: 140px !important;
+    font-size: 15px !important;
+    padding: 10px 16px !important;
+    width: auto !important;
+    height: auto !important;
+    border-radius: 8px !important;
+  }
+}
+
+/* 高コントラストモード対応 */
+@media (prefers-contrast: high) {
+  .sound-card {
+    border: 2px solid #000;
+  }
+  
+  .tag {
+    border: 2px solid #000;
+    background: #000;
+    color: #fff;
+  }
+  
+  .ios-notice {
+    border: 2px solid #000;
+    background: #fff;
+  }
+}
+
+/* ダークモード対応 */
+@media (prefers-color-scheme: dark) {
+  .sound-card {
+    background: #2d2d2d;
+    border-color: #444;
+    color: #fff;
+  }
+  
+  .ios-notice {
+    background: #1e3a8a;
+    border-color: #3b82f6;
+    color: #fff;
+  }
+  
+  .no-recordings {
+    background: #333;
+    border-color: #555;
+    color: #ccc;
+  }
+  
+  .validation-message {
+    background: #1e3a8a;
+    border-color: #3b82f6;
+    color: #fff;
+  }
+}
+
+/* 動きを抑制する設定 */
+@media (prefers-reduced-motion: reduce) {
+  .pulse-dot {
+    animation: none;
+  }
+  
+  .sound-card {
+    transition: none;
+  }
+  
+  .sound-card:hover {
+    transform: none;
+  }
+}

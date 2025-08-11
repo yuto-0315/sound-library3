@@ -19,6 +19,10 @@ const Navigation = () => {
         return '音ライブラリページ';
       case '/daw':
         return '音楽づくりページ';
+      case '/cloud':
+        return 'みんなで共有ページ';
+      case '/admin':
+        return '先生用管理ページ';
       default:
         return 'ホームページ';
     }
@@ -78,6 +82,21 @@ const Navigation = () => {
               <span role="img" aria-label="ピアノ">🎹</span> 音楽づくり
               <span id="daw-desc" className="sr-only">
                 音素材を組み合わせて音楽を作成するページ
+              </span>
+            </Link>
+          </li>
+          
+          <li role="none">
+            <Link 
+              to="/cloud" 
+              className={`nav-link ${isActive('/cloud') ? 'active' : ''}`}
+              role="menuitem"
+              aria-current={isActive('/cloud') ? 'page' : undefined}
+              aria-describedby="cloud-desc"
+            >
+              <span role="img" aria-label="クラウド">🌐</span> みんなで共有
+              <span id="cloud-desc" className="sr-only">
+                音声をアップロードしてクラスのみんなと共有するページ
               </span>
             </Link>
           </li>

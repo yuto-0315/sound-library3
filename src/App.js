@@ -5,6 +5,8 @@ import Navigation from './components/Navigation';
 import SoundCollection from './pages/SoundCollection';
 import SoundLibrary from './pages/SoundLibrary';
 import DAWPage from './pages/DAWPage';
+import CloudPage from './pages/CloudPage';
+import AdminPage from './pages/AdminPage';
 
 function App() {
   return (
@@ -25,6 +27,8 @@ function App() {
             <Route path="/collection" element={<SoundCollection />} />
             <Route path="/library" element={<SoundLibrary />} />
             <Route path="/daw" element={<DAWPage />} />
+            <Route path="/cloud" element={<CloudPage />} />
+            <Route path="/admin" element={<AdminPage />} />
           </Routes>
         </main>
       </div>

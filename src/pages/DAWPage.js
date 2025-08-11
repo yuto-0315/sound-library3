@@ -94,6 +94,15 @@ const DAWPage = () => {
   const [isTimeMode, setIsTimeMode] = useState(initialData.isTimeMode); // false: 拍子モード, true: 秒数モード
   const [secondsPerBeat, setSecondsPerBeat] = useState(initialData.secondsPerBeat); // 秒数モード時の1拍あたりの秒数
   const [isExporting, setIsExporting] = useState(false); // 音源出力中フラグ
+  
+  // クラウド保存用のstate
+  const [showCloudSaveDialog, setShowCloudSaveDialog] = useState(false);
+  const [cloudSaveData, setCloudSaveData] = useState({
+    songTitle: '',
+    studentName: '',
+    groupNumber: '',
+    roomNumber: ''
+  });
   const timelineRef = useRef(null);
   const animationFrameRef = useRef(null);
   const dragOverTimeoutRef = useRef(null);
@@ -606,6 +615,138 @@ const DAWPage = () => {
     // ファイル選択をリセット
     event.target.value = '';
   };
+
+  // クラウド保存機能
+  const openCloudSaveDialog = () => {
+    // ローカルストレージから部屋番号を取得
+    const savedRoom = localStorage.getItem('sound-library-room');
+    setCloudSaveData(prev => ({
+      ...prev,
+      roomNumber: savedRoom || '',
+      songTitle: `楽曲_${new Date().toLocaleDateString('ja-JP')}`
+    }));
+    setShowCloudSaveDialog(true);
+  };
+
+  const saveToCloud = async () => {
+    try {
+      if (!cloudSaveData.songTitle.trim()) {
+        setError('楽曲タイトルを入力してください');
+        return;
+      }
+
+      if (!cloudSaveData.roomNumber.trim()) {
+        setError('部屋番号を入力してください');
+        return;
+      }
+
+      // 部屋IDを取得
+      const roomsResponse = await fetch('/api/rooms.php');
+      const roomsData = await roomsResponse.json();
+      
+      if (!roomsData.success) {
+        setError('部屋情報の取得に失敗しました');
+        return;
+      }
+
+      const targetRoom = roomsData.data.find(room => 
+        room.room_number == cloudSaveData.roomNumber
+      );
+
+      if (!targetRoom) {
+        setError('指定された部屋番号が見つかりません');
+        return;
+      }
+
+      // プロジェクトデータを準備
+      const projectData = {
+        version: '1.0',
+        bpm: bpm,
+        tracks: tracks,
+        sounds: sounds.map(sound => ({
+          ...sound,
+          audioBlob: null,
+          audioData: sound.audioData
+        })),
+        timestamp: Date.now(),
+        trackNameCounter: trackNameCounterRef.current,
+        trackIdCounter: trackIdCounterRef.current,
+        isTimeMode: isTimeMode,
+        secondsPerBeat: secondsPerBeat
+      };
+
+      // APIに送信
+      const response = await fetch('/api/songs.php', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          room_id: targetRoom.id,
+          student_name: cloudSaveData.studentName,
+          group_number: cloudSaveData.groupNumber,
+          song_title: cloudSaveData.songTitle,
+          song_data: projectData
+        })
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        alert('楽曲をクラウドに保存しました！');
+        setShowCloudSaveDialog(false);
+        setCloudSaveData({
+          songTitle: '',
+          studentName: '',
+          groupNumber: '',
+          roomNumber: ''
+        });
+      } else {
+        setError(result.error || 'クラウド保存に失敗しました');
+      }
+    } catch (error) {
+      console.error('クラウド保存エラー:', error);
+      setError('クラウド保存に失敗しました');
+    }
+  };
+
+  // 先生用管理ページから楽曲を読み込む機能
+  useEffect(() => {
+    const checkForImportedSong = () => {
+      const importedSong = localStorage.getItem('daw-import-song');
+      if (importedSong) {
+        try {
+          const songData = JSON.parse(importedSong);
+          
+          // プロジェクトデータを復元
+          setBpm(songData.bpm || 120);
+          setIsTimeMode(songData.isTimeMode || false);
+          setSecondsPerBeat(songData.secondsPerBeat || 0.5);
+          
+          if (songData.tracks) {
+            setTracks(songData.tracks);
+          }
+          
+          if (songData.trackNameCounter) {
+            trackNameCounterRef.current = songData.trackNameCounter;
+          }
+          
+          if (songData.trackIdCounter) {
+            trackIdCounterRef.current = songData.trackIdCounter;
+          }
+          
+          // インポート済みデータを削除
+          localStorage.removeItem('daw-import-song');
+          
+          alert('先生が指定した楽曲を読み込みました！');
+        } catch (error) {
+          console.error('インポートされた楽曲の読み込みに失敗:', error);
+        }
+      }
+    };
+
+    checkForImportedSong();
+  }, []);
 
   // 音源出力機能
   const exportAudio = async () => {
@@ -1462,6 +1603,9 @@ const DAWPage = () => {
               <button className="button-secondary" onClick={saveProject}>
                 💾 プロジェクト保存
               </button>
+              <button className="button-secondary" onClick={openCloudSaveDialog}>
+                🌐 クラウド保存
+              </button>
               <label className="button-secondary file-input-label">
                 📁 プロジェクト読み込み
                 <input
@@ -1696,6 +1840,102 @@ const DAWPage = () => {
           </ul>
         </div>
       </div>
+
+      {/* クラウド保存ダイアログ */}
+      {showCloudSaveDialog && (
+        <>
+          <button
+            type="button"
+            className="modal-overlay"
+            onClick={() => setShowCloudSaveDialog(false)}
+            aria-label="ダイアログを閉じる"
+            tabIndex={0}
+            style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, border: 'none', padding: 0, margin: 0 }}
+          />
+          <div
+            className="modal-content"
+            role="dialog"
+            aria-modal="true"
+            style={{ position: 'fixed', zIndex: 1001 }}
+          >
+            <div className="modal-header">
+              <h3>🌐 楽曲をクラウドに保存</h3>
+              <button 
+                type="button"
+                className="modal-close-btn"
+                onClick={() => setShowCloudSaveDialog(false)}
+                aria-label="ダイアログを閉じる"
+              >
+                ×
+              </button>
+            </div>
+            
+            <div className="modal-body">
+              <div className="form-group">
+                <label htmlFor="cloud-song-title">楽曲タイトル *</label>
+                <input
+                  id="cloud-song-title"
+                  type="text"
+                  value={cloudSaveData.songTitle}
+                  onChange={(e) => setCloudSaveData(prev => ({...prev, songTitle: e.target.value}))}
+                  placeholder="楽曲のタイトルを入力"
+                  required
+                />
+              </div>
+              
+              <div className="form-group">
+                <label htmlFor="cloud-room-number">部屋番号 *</label>
+                <input
+                  id="cloud-room-number"
+                  type="number"
+                  value={cloudSaveData.roomNumber}
+                  onChange={(e) => setCloudSaveData(prev => ({...prev, roomNumber: e.target.value}))}
+                  placeholder="例: 101"
+                  required
+                />
+              </div>
+              
+              <div className="form-group">
+                <label htmlFor="cloud-student-name">あなたの名前</label>
+                <input
+                  id="cloud-student-name"
+                  type="text"
+                  value={cloudSaveData.studentName}
+                  onChange={(e) => setCloudSaveData(prev => ({...prev, studentName: e.target.value}))}
+                  placeholder="名前を入力（任意）"
+                />
+              </div>
+              
+              <div className="form-group">
+                <label htmlFor="cloud-group-number">班番号</label>
+                <input
+                  id="cloud-group-number"
+                  type="text"
+                  value={cloudSaveData.groupNumber}
+                  onChange={(e) => setCloudSaveData(prev => ({...prev, groupNumber: e.target.value}))}
+                  placeholder="班番号を入力（任意）"
+                />
+              </div>
+            </div>
+            
+            <div className="modal-footer">
+              <button 
+                className="button-secondary"
+                onClick={() => setShowCloudSaveDialog(false)}
+              >
+                キャンセル
+              </button>
+              <button 
+                className="button-primary"
+                onClick={saveToCloud}
+                disabled={!cloudSaveData.songTitle.trim() || !cloudSaveData.roomNumber.trim()}
+              >
+                クラウドに保存
+              </button>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 };
@@ -1946,15 +2186,15 @@ const SoundItem = ({ sound, onDragStart }) => {
             <span key={index} className="sound-tag">{tag}</span>
           ))}
         </div>
-      </div>
-      <div className="sound-actions">
-        <button 
-          className="play-sound-btn"
-          onClick={playSound}
-          disabled={isPlaying}
-        >
-          {isPlaying ? '⏸️' : '▶️'}
-        </button>
+        <div className="sound-actions">
+          <button 
+            className="play-sound-btn"
+            onClick={playSound}
+            disabled={isPlaying}
+          >
+            {isPlaying ? '⏸️' : '▶️'}
+          </button>
+        </div>
       </div>
     </div>
   );

@@ -1251,8 +1251,16 @@ const DAWPage = () => {
           // 現在の時間位置がクリップの範囲内または今後再生される場合
           if (clipEndTimeInSeconds > currentTimeInSeconds) {
             const delay = Math.max(0, clipStartTimeInSeconds - currentTimeInSeconds);
+            
+            // クリップ内のオフセット位置を計算
+            let clipOffset = 0;
+            if (currentTimeInSeconds > clipStartTimeInSeconds) {
+              // 現在位置がクリップの途中にある場合、オフセットを計算
+              clipOffset = currentTimeInSeconds - clipStartTimeInSeconds;
+            }
+            
             if (isFinite(delay) && delay >= 0) {
-              scheduleClipPlayback(clip, delay * 1000, newPlayingAudios);
+              scheduleClipPlayback(clip, delay * 1000, clipOffset, newPlayingAudios);
             }
           }
         });
@@ -1265,7 +1273,7 @@ const DAWPage = () => {
     }
   };
 
-  const scheduleClipPlayback = (clip, delayMs, playingAudiosMap) => {
+  const scheduleClipPlayback = (clip, delayMs, clipOffset, playingAudiosMap) => {
     
     if (clip.soundData && clip.soundData.audioBlob && clip.soundData.audioBlob instanceof Blob) {
       try {
@@ -1274,6 +1282,11 @@ const DAWPage = () => {
         audio.src = audioUrl;
         
         const timeoutId = setTimeout(() => {
+          // クリップのオフセット位置から再生を開始
+          if (clipOffset > 0) {
+            audio.currentTime = clipOffset;
+          }
+          
           audio.play().catch(error => {
             console.error('音声再生エラー:', error);
             URL.revokeObjectURL(audioUrl); // メモリリークを防ぐ
@@ -1314,7 +1327,7 @@ const DAWPage = () => {
           clip.soundData.audioBlob = blob;
           
           // 再帰的に再試行
-          scheduleClipPlayback(clip, delayMs, playingAudiosMap);
+          scheduleClipPlayback(clip, delayMs, clipOffset, playingAudiosMap);
           return;
         } catch (restoreError) {
           console.error('audioDataからのBlob復元に失敗:', restoreError);

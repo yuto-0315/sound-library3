@@ -102,7 +102,8 @@ const CloudPage = () => {
       const data = await response.json();
       
       if (data.success) {
-        const room = data.data.find(r => r.room_number == roomNum);
+        // roomNumを数値に変換して比較
+        const room = data.data.find(r => r.room_number === parseInt(roomNum, 10));
         if (room) {
           setCurrentRoom(room);
           localStorage.setItem('sound-library-room', roomNum);

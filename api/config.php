@@ -3,8 +3,8 @@
 class DatabaseConfig {
     private const HOST = 'localhost';
     private const DB_NAME = 'redosila_soundlibrary';
-    private const USERNAME = 'redosila_root'; // XAMPPのデフォルト
-    private const PASSWORD = 'rootpass';     // XAMPPのデフォルト
+    private const USERNAME = 'redosila_root'; 
+    private const PASSWORD = 'rootpass';   
     private const CHARSET = 'utf8mb4';
 
     public static function getConnection() {

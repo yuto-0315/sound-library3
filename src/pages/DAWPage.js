@@ -243,11 +243,38 @@ const DAWPage = () => {
     });
   }, [audioContext, pixelsPerSecond]);
 
+  // ズームレベルの定義（ピクセル/秒）
+  const ZOOM_LEVELS = [25, 50, 67, 100, 150, 200, 300, 400];
+
   // ズームイン/ズームアウト機能
   const handleZoom = useCallback(async (zoomIn) => {
-    const newPixelsPerSecond = zoomIn 
-      ? Math.min(pixelsPerSecond * 1.5, 400) // 最大400pxまで
-      : Math.max(pixelsPerSecond / 1.5, 25);  // 最小25pxまで
+    // 現在のズームレベルのインデックスを見つける
+    let currentIndex = ZOOM_LEVELS.findIndex(level => level === pixelsPerSecond);
+    
+    // 完全一致しない場合は、最も近いレベルを見つける
+    if (currentIndex === -1) {
+      currentIndex = ZOOM_LEVELS.findIndex(level => level > pixelsPerSecond);
+      if (currentIndex === -1) {
+        currentIndex = ZOOM_LEVELS.length - 1;
+      } else if (currentIndex > 0) {
+        // より近い方を選択
+        const lower = ZOOM_LEVELS[currentIndex - 1];
+        const upper = ZOOM_LEVELS[currentIndex];
+        currentIndex = (pixelsPerSecond - lower) < (upper - pixelsPerSecond) 
+          ? currentIndex - 1 
+          : currentIndex;
+      }
+    }
+    
+    // 新しいインデックスを計算
+    const newIndex = zoomIn 
+      ? Math.min(currentIndex + 1, ZOOM_LEVELS.length - 1)
+      : Math.max(currentIndex - 1, 0);
+    
+    const newPixelsPerSecond = ZOOM_LEVELS[newIndex];
+    
+    // 同じ値なら何もしない
+    if (newPixelsPerSecond === pixelsPerSecond) return;
     
     setPixelsPerSecond(newPixelsPerSecond);
     
@@ -345,7 +372,17 @@ const DAWPage = () => {
       const projectData = {
         version: '1.0',
         pixelsPerSecond: pixelsPerSecond,
-        tracks: tracks,
+        tracks: tracks.map(track => ({
+          ...track,
+          clips: track.clips.map(clip => ({
+            ...clip,
+            soundData: clip.soundData ? {
+              ...clip.soundData,
+              audioBlob: null, // Blobは送信しない
+              audioData: clip.soundData.audioData // base64データを保持
+            } : null
+          }))
+        })),
         sounds: sounds.map(sound => ({
           ...sound,
           audioBlob: null, // Blobは別途保存
@@ -409,12 +446,8 @@ const DAWPage = () => {
           return soundData;
         };
 
-        // BPMを復元
-        setBpm(projectData.bpm || 120);
-        
-        // 時間モード設定を復元
-        setIsTimeMode(projectData.isTimeMode || false);
-        setSecondsPerBeat(projectData.secondsPerBeat || 0.5);
+        // ピクセル/秒を復元
+        setPixelsPerSecond(projectData.pixelsPerSecond || DEFAULT_PIXELS_PER_SECOND);
         
         // トラックを復元（クリップ内の音声データも復元）
         if (projectData.tracks) {
@@ -535,7 +568,7 @@ const DAWPage = () => {
       }
 
       const targetRoom = roomsData.data.find(room => 
-        room.room_number == cloudSaveData.roomNumber
+        room.room_number === parseInt(cloudSaveData.roomNumber, 10)
       );
 
       if (!targetRoom) {
@@ -547,7 +580,17 @@ const DAWPage = () => {
       const projectData = {
         version: '1.0',
         pixelsPerSecond: pixelsPerSecond,
-        tracks: tracks,
+        tracks: tracks.map(track => ({
+          ...track,
+          clips: track.clips.map(clip => ({
+            ...clip,
+            soundData: clip.soundData ? {
+              ...clip.soundData,
+              audioBlob: null, // Blobは送信しない
+              audioData: clip.soundData.audioData // base64データを保持
+            } : null
+          }))
+        })),
         sounds: sounds.map(sound => ({
           ...sound,
           audioBlob: null,
@@ -915,11 +958,11 @@ const DAWPage = () => {
       window.currentDraggedSound = null;
       
       
-      // 音声の実際の継続時間を取得（現在のBPMに基づいて）
-      let duration = 400; // デフォルト値（1小節）
+      // 音声の実際の継続時間を取得
+      let duration = 400; // デフォルト値
       if (soundData.audioBlob) {
         try {
-          duration = await getAudioDuration(soundData.audioBlob, bpm);
+          duration = await getAudioDuration(soundData.audioBlob, pixelsPerSecond);
         } catch (error) {
           console.warn('音声継続時間の取得に失敗しました:', error);
         }
@@ -928,7 +971,7 @@ const DAWPage = () => {
       // durationが有効な値かチェック
       if (!isFinite(duration) || duration <= 0) {
         console.warn('無効なduration:', duration, 'デフォルト値を使用');
-        duration = 400; // 1小節分
+        duration = 400;
       }
 
       // 新しい音素材の場合は通常のスナップ処理
@@ -1403,7 +1446,7 @@ const DAWPage = () => {
         name: 'トラック 1', 
         clips: [] 
       }]);
-      setBpm(120);
+      setPixelsPerSecond(DEFAULT_PIXELS_PER_SECOND);
       trackNameCounterRef.current = 1;
       trackIdCounterRef.current = 1;
       
@@ -1569,7 +1612,7 @@ const DAWPage = () => {
 
           <div className="timing-controls">
             <div className="zoom-control">
-              <label>🔍 タイムライン拡大/縮小:</label>
+              <span>🔍 タイムライン拡大/縮小:</span>
               <button 
                 className="zoom-btn"
                 onClick={() => handleZoom(false)}
@@ -2117,38 +2160,27 @@ const TrackHeader = ({ track, onRemove, trackHeight, trackIndex }) => {
 const Timeline = ({ pixelsPerSecond }) => {
   // 秒数ベースのタイムライン表示
   const totalSeconds = TIME_MODE_TOTAL_SECONDS;
-  const intervalSeconds = 5; // 5秒間隔で大きな目盛り
-  const totalIntervals = Math.ceil(totalSeconds / intervalSeconds);
   
   return (
     <div className="timeline" style={{ minWidth: totalSeconds * pixelsPerSecond }}>
-      {Array.from({ length: totalIntervals }, (_, intervalIndex) => {
-        const startSecond = intervalIndex * intervalSeconds;
-        const endSecond = Math.min((intervalIndex + 1) * intervalSeconds, totalSeconds);
-        const intervalWidth = (endSecond - startSecond) * pixelsPerSecond;
-        
-        return (
-          <div key={intervalIndex} className="time-interval" style={{ width: intervalWidth }}>
-            <div className="time-number">{startSecond}秒</div>
-            <div className="time-marks">
-              {Array.from({ length: endSecond - startSecond }, (_, secondIndex) => (
-                <div 
-                  key={secondIndex} 
-                  className="time-mark"
-                  style={{ width: pixelsPerSecond }}
-                >
-                  <div className="time-main">
-                    {startSecond + secondIndex + 1}s
-                  </div>
-                  <div className="time-sub">
-                    <div className="sub-time-marker">・</div>
-                  </div>
-                </div>
-              ))}
+      {Array.from({ length: totalSeconds + 1 }, (_, second) => (
+        <div 
+          key={second} 
+          className="time-mark"
+          style={{ 
+            position: 'absolute',
+            left: second * pixelsPerSecond,
+            width: pixelsPerSecond,
+            height: '100%'
+          }}
+        >
+          {second % 5 === 0 && (
+            <div className="time-main">
+              {second}s
             </div>
-          </div>
-        );
-      })}
+          )}
+        </div>
+      ))}
     </div>
   );
 };
@@ -2231,49 +2263,30 @@ const Track = ({ track, onDrop, onDragOver, onRemoveClip, onClipDragStart, onDra
       onDragOver={onDragOver}
     >
       <div className="track-grid">
-        {isTimeMode ? (
-          // 秒数モード: 秒単位でグリッド線を表示
-          <>
-            {/* 1秒ごとの主要な境界線 */}
-            {Array.from({ length: TIME_MODE_TOTAL_SECONDS }, (_, index) => (
-              <div 
-                key={`time-main-${index}`} 
-                className={`beat-line beat-line-main ${index === 0 ? 'first-beat' : ''} ${index % 5 === 0 ? 'measure-start' : ''}`} 
-                style={{ left: index * PIXELS_PER_SECOND }} 
-              />
-            ))}
-            {/* 0.5秒ごとの副次的な境界線 */}
-            {Array.from({ length: TIME_MODE_TOTAL_SECONDS * 2 }, (_, index) => {
-              if (index % 2 === 1) { // 奇数のインデックス（0.5秒、1.5秒など）
-                return (
-                  <div 
-                    key={`time-sub-${index}`} 
-                    className="beat-line beat-line-sub" 
-                    style={{ left: (index * PIXELS_PER_SECOND) / 2 }} 
-                  />
-                );
-              }
-              return null;
-            })}
-          </>
-        ) : (
-          // 拍子モード: 従来の拍・小節グリッド
-          <>
-            {/* 表拍（主要な拍）の境界線を表示 */}
-            {Array.from({ length: TOTAL_BEATS }, (_, index) => {
-              const isFirstBeat = index === 0;
-              const isMeasureStart = index % BEATS_PER_MEASURE === 0;
-              const className = `beat-line beat-line-main ${isFirstBeat ? 'first-beat' : ''} ${isMeasureStart ? 'measure-start' : ''}`;
+        {/* 秒単位でグリッド線を表示 */}
+        <>
+          {/* 1秒ごとの主要な境界線 */}
+          {Array.from({ length: TIME_MODE_TOTAL_SECONDS }, (_, index) => (
+            <div 
+              key={`time-main-${index}`} 
+              className={`beat-line beat-line-main ${index === 0 ? 'first-beat' : ''} ${index % 5 === 0 ? 'measure-start' : ''}`} 
+              style={{ left: index * pixelsPerSecond }} 
+            />
+          ))}
+          {/* 0.5秒ごとの副次的な境界線 */}
+          {Array.from({ length: TIME_MODE_TOTAL_SECONDS * 2 }, (_, index) => {
+            if (index % 2 === 1) { // 奇数のインデックス（0.5秒、1.5秒など）
               return (
-                <div key={`main-${index}`} className={className} style={{ left: index * BEAT_WIDTH }} />
+                <div 
+                  key={`time-sub-${index}`} 
+                  className="beat-line beat-line-sub" 
+                  style={{ left: (index * pixelsPerSecond) / 2 }} 
+                />
               );
-            })}
-            {/* 裏拍（8分音符）の境界線を表示 */}
-            {Array.from({ length: TOTAL_BEATS }, (_, index) => (
-              <div key={`sub-${index}`} className="beat-line beat-line-sub" style={{ left: index * BEAT_WIDTH + SUB_BEAT_WIDTH }} />
-            ))}
-          </>
-        )}
+            }
+            return null;
+          })}
+        </>
       </div>
       
       {track.clips.map(clip => (

@@ -1178,12 +1178,16 @@ const DAWPage = () => {
       
       
       // 音声の実際の継続時間を取得
-      let duration = 400; // デフォルト値
-      if (soundData.audioBlob) {
+      // まずグローバル変数から事前計算された長さを取得
+      let duration = window.currentDraggedSoundDuration || 400;
+      
+      // グローバル変数が無い場合、または無効な場合は再計算
+      if ((!duration || !isFinite(duration) || duration <= 0) && soundData.audioBlob) {
         try {
           duration = await getAudioDuration(soundData.audioBlob, pixelsPerSecond);
         } catch (error) {
           console.warn('音声継続時間の取得に失敗しました:', error);
+          duration = 400;
         }
       }
 
@@ -1192,6 +1196,9 @@ const DAWPage = () => {
         console.warn('無効なduration:', duration, 'デフォルト値を使用');
         duration = 400;
       }
+      
+      // グローバル変数をクリア
+      window.currentDraggedSoundDuration = null;
 
       // 新しい音素材の場合は通常のスナップ処理
       const snappedPosition = getSnapPosition(timePosition);
@@ -1378,9 +1385,16 @@ const DAWPage = () => {
     if (window.currentDraggedSound) {
       window.currentDraggedSound = null;
     }
+    if (window.currentDraggedSoundDuration) {
+      window.currentDraggedSoundDuration = null;
+    }
     
-    // ボディクラスのクリーンアップ
+    // ボディクラスとスタイルのクリーンアップ（スクロールを再有効化）
     document.body.classList.remove('dragging');
+    document.body.style.overflow = '';
+    document.body.style.position = '';
+    document.body.style.width = '';
+    document.body.style.height = '';
   }, []);
 
   // コンポーネントマウント時にグローバルコールバックを設定
@@ -1897,12 +1911,16 @@ const DAWPage = () => {
                       try {
                         const duration = await getAudioDuration(sound.audioBlob, pixelsPerSecond);
                         setDraggedSoundDuration(duration);
+                        // グローバル変数にも保存（ドロップ時に使用）
+                        window.currentDraggedSoundDuration = duration;
                       } catch (error) {
                         console.warn('ドラッグ時の音声長さ計算に失敗:', error);
                         setDraggedSoundDuration(400);
+                        window.currentDraggedSoundDuration = 400;
                       }
                     } else {
                       setDraggedSoundDuration(400);
+                      window.currentDraggedSoundDuration = 400;
                     }
                   }}
                 />
@@ -2120,9 +2138,13 @@ const SoundItem = ({ sound, onDragStart }) => {
   const audioRef = useRef(null);
   const audioUrlRef = useRef(null);
 
-  const handleDragStart = (e) => {
-    // スクロールを無効化
+  const handleDragStart = async (e) => {
+    // スクロールを無効化（強制的に）
     document.body.classList.add('dragging');
+    document.body.style.overflow = 'hidden';
+    document.body.style.position = 'fixed';
+    document.body.style.width = '100%';
+    document.body.style.height = '100%';
     
     // audioBlob以外のデータをJSON文字列として設定
     const soundDataForTransfer = {
@@ -2138,7 +2160,7 @@ const SoundItem = ({ sound, onDragStart }) => {
     
     // 親コンポーネントのonDragStart関数を呼び出し（音声の長さを計算）
     if (onDragStart) {
-      onDragStart(sound);
+      await onDragStart(sound);
     }
   };
 
@@ -2166,10 +2188,17 @@ const SoundItem = ({ sound, onDragStart }) => {
       setIsDragging(true);
       // スクロールを一時的に無効化（移動が確定してから）
       document.body.classList.add('dragging');
+      document.body.style.overflow = 'hidden';
+      document.body.style.position = 'fixed';
+      document.body.style.width = '100%';
+      document.body.style.height = '100%';
       
-      // 親コンポーネントのonDragStart関数を呼び出し
+      // 親コンポーネントのonDragStart関数を呼び出し（非同期）
       if (onDragStart) {
-        onDragStart(sound);
+        // 非同期で音声の長さを計算（待たない）
+        onDragStart(sound).catch(err => {
+          console.warn('タッチドラッグ開始時の音声長さ計算に失敗:', err);
+        });
       }
       // グローバル変数に設定
       window.currentDraggedSoundBlob = sound.audioBlob;
@@ -2230,8 +2259,12 @@ const SoundItem = ({ sound, onDragStart }) => {
     setTouchMove(null);
     setIsDragging(false);
     
-    // SoundItem 内での直接クリーンアップ
+    // SoundItem 内での直接クリーンアップ（スクロールを再有効化）
     document.body.classList.remove('dragging');
+    document.body.style.overflow = '';
+    document.body.style.position = '';
+    document.body.style.width = '';
+    document.body.style.height = '';
     
     // ハイライトを削除
     document.querySelectorAll('.track').forEach(track => {
@@ -2250,6 +2283,9 @@ const SoundItem = ({ sound, onDragStart }) => {
     }
     if (window.currentDraggedSound) {
       window.currentDraggedSound = null;
+    }
+    if (window.currentDraggedSoundDuration) {
+      window.currentDraggedSoundDuration = null;
     }
   };
 

@@ -1033,6 +1033,21 @@
   z-index: 100;
 }
 
+/* ドラッグ中はbodyのスクロールを無効化（全デバイス共通） */
+body.dragging {
+  overflow: hidden !important;
+  position: fixed !important;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* ドラッグ中はタイムラインとトラックエリアのスクロールも無効化 */
+body.dragging .timeline-container,
+body.dragging .tracks-area {
+  overflow: hidden !important;
+  pointer-events: auto; /* ドロップは許可 */
+}
+
 /* タッチデバイス用の調整 */
 @media (hover: none) and (pointer: coarse) {
   .sound-item {

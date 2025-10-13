@@ -1178,17 +1178,26 @@ const DAWPage = () => {
       
       
       // 音声の実際の継続時間を取得
-      // まずグローバル変数から事前計算された長さを取得
-      let duration = window.currentDraggedSoundDuration || 400;
+      let duration = 400; // デフォルト値
       
-      // グローバル変数が無い場合、または無効な場合は再計算
-      if ((!duration || !isFinite(duration) || duration <= 0) && soundData.audioBlob) {
+      // まずグローバル変数から事前計算された長さを取得
+      if (window.currentDraggedSoundDuration && 
+          isFinite(window.currentDraggedSoundDuration) && 
+          window.currentDraggedSoundDuration > 0) {
+        duration = window.currentDraggedSoundDuration;
+        console.log('事前計算された音声の長さを使用:', duration);
+      } else if (soundData.audioBlob) {
+        // グローバル変数が無い場合は再計算
+        console.log('音声の長さを再計算中...');
         try {
           duration = await getAudioDuration(soundData.audioBlob, pixelsPerSecond);
+          console.log('計算された音声の長さ:', duration);
         } catch (error) {
           console.warn('音声継続時間の取得に失敗しました:', error);
           duration = 400;
         }
+      } else {
+        console.warn('audioBlobが見つかりません。デフォルト値を使用:', duration);
       }
 
       // durationが有効な値かチェック
@@ -1906,10 +1915,12 @@ const DAWPage = () => {
                   key={sound.id} 
                   sound={sound} 
                   onDragStart={async (sound) => {
+                    console.log('onDragStart呼び出し:', sound.name);
                     // ドラッグ開始時に音声の長さを計算
                     if (sound.audioBlob) {
                       try {
                         const duration = await getAudioDuration(sound.audioBlob, pixelsPerSecond);
+                        console.log('音声の長さ計算完了:', duration, 'ピクセル');
                         setDraggedSoundDuration(duration);
                         // グローバル変数にも保存（ドロップ時に使用）
                         window.currentDraggedSoundDuration = duration;
@@ -1919,6 +1930,7 @@ const DAWPage = () => {
                         window.currentDraggedSoundDuration = 400;
                       }
                     } else {
+                      console.warn('audioBlobが見つかりません');
                       setDraggedSoundDuration(400);
                       window.currentDraggedSoundDuration = 400;
                     }
@@ -2137,14 +2149,65 @@ const SoundItem = ({ sound, onDragStart }) => {
   const [touchMove, setTouchMove] = useState(null);
   const audioRef = useRef(null);
   const audioUrlRef = useRef(null);
+  const durationCacheRef = useRef(null); // 音声の長さをキャッシュ
+  
+  // マウスオーバー時に音声の長さを事前計算
+  const handleMouseEnter = useCallback(() => {
+    // 既にキャッシュされている場合はスキップ
+    if (durationCacheRef.current !== null) {
+      return;
+    }
+    
+    // 音声の長さを事前に計算してキャッシュ
+    if (onDragStart && sound.audioBlob) {
+      onDragStart(sound).then(() => {
+        // 計算完了後、グローバル変数から取得してキャッシュ
+        if (window.currentDraggedSoundDuration) {
+          durationCacheRef.current = window.currentDraggedSoundDuration;
+        }
+      }).catch(err => {
+        console.warn('音声長さの事前計算に失敗:', err);
+      });
+    }
+  }, [sound, onDragStart]);
 
   const handleDragStart = async (e) => {
+    console.log('handleDragStart開始:', sound.name, 'キャッシュ:', durationCacheRef.current);
+    
     // スクロールを無効化（強制的に）
     document.body.classList.add('dragging');
     document.body.style.overflow = 'hidden';
     document.body.style.position = 'fixed';
     document.body.style.width = '100%';
     document.body.style.height = '100%';
+    
+    // カスタムドラッグイメージを設定（テキストとして表示）
+    const dragImage = document.createElement('div');
+    dragImage.textContent = sound.name;
+    dragImage.style.cssText = `
+      position: absolute;
+      top: -1000px;
+      background: rgba(0, 123, 255, 0.9);
+      color: white;
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      white-space: nowrap;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+      pointer-events: none;
+    `;
+    document.body.appendChild(dragImage);
+    
+    // ドラッグイメージとして設定（中央に配置）
+    e.dataTransfer.setDragImage(dragImage, dragImage.offsetWidth / 2, dragImage.offsetHeight / 2);
+    
+    // 少し遅延してから削除
+    setTimeout(() => {
+      if (dragImage && dragImage.parentNode) {
+        dragImage.parentNode.removeChild(dragImage);
+      }
+    }, 0);
     
     // audioBlob以外のデータをJSON文字列として設定
     const soundDataForTransfer = {
@@ -2158,9 +2221,21 @@ const SoundItem = ({ sound, onDragStart }) => {
     // 実際のaudioBlobは別途グローバル変数で保持
     window.currentDraggedSoundBlob = sound.audioBlob;
     
+    // キャッシュされた長さがある場合はそれを使用
+    if (durationCacheRef.current !== null) {
+      window.currentDraggedSoundDuration = durationCacheRef.current;
+    }
+    
     // 親コンポーネントのonDragStart関数を呼び出し（音声の長さを計算）
-    if (onDragStart) {
-      await onDragStart(sound);
+    // キャッシュがない場合は計算を開始（待機しない）
+    if (onDragStart && durationCacheRef.current === null) {
+      onDragStart(sound).catch(err => {
+        console.warn('ドラッグ開始時の音声長さ計算に失敗:', err);
+        // エラーが発生してもグローバル変数にデフォルト値を設定
+        if (!window.currentDraggedSoundDuration) {
+          window.currentDraggedSoundDuration = 400;
+        }
+      });
     }
   };
 
@@ -2408,6 +2483,7 @@ const SoundItem = ({ sound, onDragStart }) => {
       className={`sound-item ${isDragging ? 'dragging' : ''}`}
       draggable="true"
       onDragStart={handleDragStart}
+      onMouseEnter={handleMouseEnter}
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}

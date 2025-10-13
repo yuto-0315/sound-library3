@@ -740,7 +740,7 @@
 }
 
 .remove-clip-btn {
-  background: rgba(255, 255, 255, 0.3);
+  background: var(--warning-color);
   border: none;
   color: white;
   width: 20px;

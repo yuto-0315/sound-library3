@@ -415,17 +415,20 @@
 }
 
 .remove-track-btn {
-  background: rgba(255, 255, 255, 0.2);
+  background: linear-gradient(135deg, #ef5350, #e53935); /* 赤系の背景 */
   border: none;
   color: white;
   padding: 4px 8px;
   border-radius: 4px;
   cursor: pointer;
-  transition: background 0.2s ease;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 4px rgba(239, 83, 80, 0.3);
 }
 
 .remove-track-btn:hover {
-  background: rgba(244, 67, 54, 0.8);
+  background: linear-gradient(135deg, #f44336, #d32f2f);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(239, 83, 80, 0.4);
 }
 
 /* トラック追加ボタンコンテナ */
@@ -441,7 +444,7 @@
 
 .track-add-btn {
   background: linear-gradient(135deg, var(--primary-color), var(--primary-hover));
-  color: white;
+  color: #ffffff; /* 白色を明示的に指定 */
   border: none;
   padding: 12px 20px;
   border-radius: 8px;
@@ -455,6 +458,7 @@
 .track-add-btn:hover {
   transform: translateY(-1px);
   box-shadow: 0 4px 12px rgba(0, 102, 204, 0.4);
+  color: #ffffff; /* ホバー時も白色を維持 */
 }
 
 .timeline-container {
@@ -686,6 +690,7 @@
   cursor: grab;
   overflow: hidden;
   transition: all 0.2s ease;
+  z-index: 2; /* 縦線より前面に表示 */
 }
 
 .audio-clip:active {
@@ -1081,6 +1086,14 @@
   
   /* ドラッグ中はbodyのスクロールを無効化 */
   body.dragging {
+    overflow: hidden;
+    touch-action: none;
+  }
+  
+  /* ドラッグ中はタイムラインとトラックエリアのスクロールも無効化 */
+  body.dragging .timeline-container,
+  body.dragging .tracks-area,
+  body.dragging .track {
     overflow: hidden;
     touch-action: none;
   }
@@ -1568,9 +1581,10 @@
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
   max-width: 500px;
   width: 90%;
-  max-height: 90vh;
+  max-height: 85vh; /* 高さを85%に調整して余白を確保 */
   overflow-y: auto;
   animation: modalSlideIn 0.3s ease-out;
+  margin: 20px; /* 上下にマージンを追加 */
 }
 
 @keyframes modalSlideIn {
@@ -1649,6 +1663,7 @@
 
 .modal-footer {
   padding: 20px;
+  padding-bottom: 30px; /* 下部に追加のマージン */
   border-top: 1px solid #e2e8f0;
   display: flex;
   justify-content: flex-end;

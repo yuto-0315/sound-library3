@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import './CloudPage.css';
 
 const CloudPage = () => {
@@ -20,6 +20,8 @@ const CloudPage = () => {
     tags: []
   });
   const [newTag, setNewTag] = useState('');
+  const [playingAudioId, setPlayingAudioId] = useState(null);
+  const audioRefs = useRef({});
 
   const API_BASE_URL = '../api';
 
@@ -284,6 +286,62 @@ const CloudPage = () => {
     }
   };
 
+  // 音声ファイルを再生
+  const playAudioFile = async (audioFile) => {
+    try {
+      // 既に再生中の音声を停止
+      if (playingAudioId && audioRefs.current[playingAudioId]) {
+        audioRefs.current[playingAudioId].pause();
+        audioRefs.current[playingAudioId].currentTime = 0;
+      }
+
+      // 同じファイルの場合は停止
+      if (playingAudioId === audioFile.id) {
+        setPlayingAudioId(null);
+        return;
+      }
+
+      // 音声ファイルをダウンロード
+      const userIdentifier = localStorage.getItem('user-identifier') || 
+                            'user_' + Math.random().toString(36).substr(2, 9);
+      localStorage.setItem('user-identifier', userIdentifier);
+      
+      const downloadUrl = `${API_BASE_URL}/download.php?uid=${audioFile.uid}&user_id=${userIdentifier}`;
+      
+      const response = await fetch(downloadUrl);
+      if (!response.ok) {
+        throw new Error('音声ファイルの読み込みに失敗しました');
+      }
+      
+      const audioBlob = await response.blob();
+      const audioUrl = URL.createObjectURL(audioBlob);
+      
+      // Audio要素を作成して再生
+      const audio = new Audio(audioUrl);
+      audioRefs.current[audioFile.id] = audio;
+      
+      audio.addEventListener('ended', () => {
+        setPlayingAudioId(null);
+        URL.revokeObjectURL(audioUrl);
+        delete audioRefs.current[audioFile.id];
+      });
+      
+      audio.addEventListener('error', () => {
+        setError('音声の再生に失敗しました');
+        setPlayingAudioId(null);
+        URL.revokeObjectURL(audioUrl);
+        delete audioRefs.current[audioFile.id];
+      });
+      
+      await audio.play();
+      setPlayingAudioId(audioFile.id);
+      
+    } catch (err) {
+      setError('音声の再生に失敗しました');
+      console.error('Play audio error:', err);
+    }
+  };
+
   if (!currentRoom) {
     return (
       <div className="cloud-page">
@@ -513,6 +571,13 @@ const CloudPage = () => {
                 </div>
                 
                 <div className="audio-actions">
+                  <button 
+                    onClick={() => playAudioFile(audioFile)} 
+                    className="play-button"
+                    title={playingAudioId === audioFile.id ? '停止' : '再生'}
+                  >
+                    {playingAudioId === audioFile.id ? '⏹️' : '▶️'}
+                  </button>
                   <button 
                     onClick={() => handleDownload(audioFile)} 
                     className="download-button"

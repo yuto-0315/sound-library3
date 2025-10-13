@@ -26,16 +26,56 @@ const DAWPage = () => {
           trackIdCounterRef.current = projectData.trackIdCounter;
         }
         
-        // 無効なクリップをフィルタリング
+        // 音素材データを復元（LocalStorageから）
+        const savedSounds = JSON.parse(localStorage.getItem('soundRecordings') || '[]');
+        const soundsMap = new Map();
+        
+        // 音素材をMapに格納（名前をキーにして高速検索）
+        savedSounds.forEach(sound => {
+          if (sound.name && sound.audioData) {
+            soundsMap.set(sound.name, sound);
+          }
+        });
+        
+        // audioBlobを復元する関数
+        const restoreAudioBlob = (soundData) => {
+          if (!soundData || !soundData.name) return soundData;
+          
+          // LocalStorageの音素材から対応するデータを取得
+          const savedSound = soundsMap.get(soundData.name);
+          if (savedSound && savedSound.audioData) {
+            try {
+              const byteCharacters = atob(savedSound.audioData.split(',')[1]);
+              const byteNumbers = new Array(byteCharacters.length);
+              for (let i = 0; i < byteCharacters.length; i++) {
+                byteNumbers[i] = byteCharacters.charCodeAt(i);
+              }
+              const byteArray = new Uint8Array(byteNumbers);
+              const blob = new Blob([byteArray], { type: 'audio/wav' });
+              return { ...soundData, audioBlob: blob, audioData: savedSound.audioData };
+            } catch (error) {
+              console.error('audioBlob復元エラー:', soundData.name, error);
+            }
+          }
+          return soundData;
+        };
+        
+        // 無効なクリップをフィルタリング & audioBlobを復元
         const validTracks = (projectData.tracks || []).map(track => ({
           ...track,
-          clips: (track.clips || []).filter(clip => {
-            if (!clip.soundData || !clip.soundData.name) {
-              console.warn('自動保存データから無効なクリップを除外:', clip);
-              return false;
-            }
-            return true;
-          })
+          clips: (track.clips || [])
+            .map(clip => {
+              if (!clip.soundData || !clip.soundData.name) {
+                console.warn('自動保存データから無効なクリップを除外:', clip);
+                return null;
+              }
+              // soundDataのaudioBlobを復元
+              return {
+                ...clip,
+                soundData: restoreAudioBlob(clip.soundData)
+              };
+            })
+            .filter(clip => clip !== null)
         }));
         
         return {
@@ -276,9 +316,12 @@ const DAWPage = () => {
     // 同じ値なら何もしない
     if (newPixelsPerSecond === pixelsPerSecond) return;
     
+    // ズーム比率を計算
+    const zoomRatio = newPixelsPerSecond / pixelsPerSecond;
+    
     setPixelsPerSecond(newPixelsPerSecond);
     
-    // 既存のクリップのdurationを新しい倍率で再計算
+    // 既存のクリップのdurationとstartTimeを新しい倍率で再計算
     const updatedTracks = await Promise.all(
       tracks.map(async (track) => {
         const updatedClips = await Promise.all(
@@ -286,13 +329,19 @@ const DAWPage = () => {
             if (clip.soundData && clip.soundData.audioBlob) {
               try {
                 const newDuration = await getAudioDuration(clip.soundData.audioBlob, newPixelsPerSecond);
-                return { ...clip, duration: newDuration };
+                // startTimeもズーム比率に合わせて調整（時間的な位置を維持）
+                const newStartTime = clip.startTime * zoomRatio;
+                return { ...clip, duration: newDuration, startTime: newStartTime };
               } catch (error) {
                 console.warn('クリップのduration再計算に失敗:', error);
-                return clip;
+                // エラー時もstartTimeは調整
+                const newStartTime = clip.startTime * zoomRatio;
+                return { ...clip, startTime: newStartTime };
               }
             }
-            return clip;
+            // audioBlobがない場合もstartTimeは調整
+            const newStartTime = clip.startTime * zoomRatio;
+            return { ...clip, startTime: newStartTime };
           })
         );
         return { ...track, clips: updatedClips };
@@ -307,6 +356,108 @@ const DAWPage = () => {
     const snapInterval = pixelsPerSecond * 0.1; // 0.1秒単位
     return Math.round(position / snapInterval) * snapInterval;
   }, [pixelsPerSecond]);
+
+  // クリップが重ならないように位置を調整する関数
+  const findNonOverlappingPosition = useCallback((trackClips, newStartTime, newDuration, excludeClipId = null) => {
+    // 対象となるトラックのクリップ（自分自身は除外）
+    const otherClips = trackClips.filter(clip => clip.id !== excludeClipId);
+    
+    // 重なりがない場合はそのままの位置を返す
+    const hasOverlap = (start, duration) => {
+      const end = start + duration;
+      return otherClips.some(clip => {
+        const clipEnd = clip.startTime + clip.duration;
+        // 重なりの判定: 新しいクリップの開始が既存クリップの範囲内、または終了が既存クリップの範囲内
+        return (start < clipEnd && end > clip.startTime);
+      });
+    };
+
+    if (!hasOverlap(newStartTime, newDuration)) {
+      return newStartTime;
+    }
+
+    // 重なりがある場合、前後の近い隙間を探す
+    const findNearestGap = (preferredStart) => {
+      // 全てのクリップを開始時間順にソート
+      const sortedClips = [...otherClips].sort((a, b) => a.startTime - b.startTime);
+      
+      // 前方向（左側）を探す
+      let leftPosition = preferredStart;
+      for (let i = sortedClips.length - 1; i >= 0; i--) {
+        const clip = sortedClips[i];
+        const clipEnd = clip.startTime + clip.duration;
+        
+        if (clipEnd <= preferredStart) {
+          // このクリップの後ろから開始できるかチェック
+          const candidateStart = clipEnd;
+          const nextClip = sortedClips[i + 1];
+          
+          if (!nextClip || candidateStart + newDuration <= nextClip.startTime) {
+            leftPosition = candidateStart;
+            break;
+          }
+        }
+      }
+
+      // 後方向（右側）を探す
+      let rightPosition = null;
+      for (let i = 0; i < sortedClips.length; i++) {
+        const clip = sortedClips[i];
+        const clipEnd = clip.startTime + clip.duration;
+        
+        if (clip.startTime >= preferredStart) {
+          // このクリップの前に配置できるかチェック
+          const candidateStart = clip.startTime - newDuration;
+          
+          if (candidateStart >= 0) {
+            const prevClip = sortedClips[i - 1];
+            if (!prevClip || candidateStart >= prevClip.startTime + prevClip.duration) {
+              rightPosition = candidateStart;
+              break;
+            }
+          }
+          
+          // このクリップの後ろに配置
+          const candidateStart2 = clipEnd;
+          const nextClip = sortedClips[i + 1];
+          
+          if (!nextClip || candidateStart2 + newDuration <= nextClip.startTime) {
+            if (rightPosition === null) {
+              rightPosition = candidateStart2;
+            }
+            break;
+          }
+        }
+      }
+
+      // 最後のクリップの後ろもチェック
+      if (sortedClips.length > 0 && rightPosition === null) {
+        const lastClip = sortedClips[sortedClips.length - 1];
+        rightPosition = lastClip.startTime + lastClip.duration;
+      }
+
+      // 先頭（0秒）もチェック
+      if (sortedClips.length === 0 || (sortedClips[0].startTime >= newDuration)) {
+        const startPosition = 0;
+        if (leftPosition === preferredStart && rightPosition === null) {
+          return startPosition;
+        }
+      }
+
+      // 前後どちらが近いか比較
+      const leftDistance = Math.abs(leftPosition - preferredStart);
+      const rightDistance = rightPosition !== null ? Math.abs(rightPosition - preferredStart) : Infinity;
+
+      if (rightDistance < leftDistance) {
+        return rightPosition;
+      }
+      
+      return leftPosition >= 0 ? leftPosition : (rightPosition !== null ? rightPosition : 0);
+    };
+
+    const adjustedPosition = findNearestGap(newStartTime);
+    return Math.max(0, getSnapPosition(adjustedPosition));
+  }, [getSnapPosition]);
 
   // プレイヘッドのアニメーション更新
   const updatePlayhead = useCallback(() => {
@@ -667,16 +818,67 @@ const DAWPage = () => {
             return soundData;
           };
           
+          // 使用されている音素材を収集
+          const usedSounds = new Map(); // name をキーにして重複を避ける
+          
           if (songData.tracks) {
             // 各トラックのクリップのsoundDataを復元
             const restoredTracks = songData.tracks.map(track => ({
               ...track,
-              clips: track.clips.map(clip => ({
-                ...clip,
-                soundData: restoreAudioBlob(clip.soundData)
-              }))
+              clips: track.clips.map(clip => {
+                const restoredSoundData = restoreAudioBlob(clip.soundData);
+                
+                // 音素材を収集（重複チェック）
+                if (restoredSoundData && restoredSoundData.name && !usedSounds.has(restoredSoundData.name)) {
+                  usedSounds.set(restoredSoundData.name, restoredSoundData);
+                }
+                
+                return {
+                  ...clip,
+                  soundData: restoredSoundData
+                };
+              })
             }));
             setTracks(restoredTracks);
+          }
+          
+          // 使用されている音素材を音ライブラリーに自動追加
+          if (usedSounds.size > 0) {
+            setSounds(prevSounds => {
+              const existingNames = new Set(prevSounds.map(s => s.name));
+              const maxId = prevSounds.length > 0 ? Math.max(...prevSounds.map(s => s.id)) : 0;
+              
+              const newSounds = [];
+              let idCounter = 1;
+              
+              usedSounds.forEach((soundData) => {
+                // すでに同じ名前の音素材が存在する場合はスキップ
+                if (!existingNames.has(soundData.name)) {
+                  newSounds.push({
+                    ...soundData,
+                    id: maxId + idCounter,
+                    source: 'cloud-import',
+                    importedAt: new Date().toISOString()
+                  });
+                  idCounter++;
+                  existingNames.add(soundData.name);
+                }
+              });
+              
+              if (newSounds.length > 0) {
+                // LocalStorageにも保存
+                const updatedSounds = [...prevSounds, ...newSounds];
+                const soundsForStorage = updatedSounds.map(sound => ({
+                  ...sound,
+                  audioBlob: undefined // Blobは保存しない
+                }));
+                localStorage.setItem('soundRecordings', JSON.stringify(soundsForStorage));
+                
+                console.log(`${newSounds.length}個の音素材を音ライブラリーに追加しました`);
+              }
+              
+              return [...prevSounds, ...newSounds];
+            });
           }
           
           if (songData.trackNameCounter) {
@@ -690,7 +892,8 @@ const DAWPage = () => {
           // インポート済みデータを削除
           localStorage.removeItem('daw-import-song');
           
-          alert('先生が指定した楽曲を読み込みました！');
+          const soundCount = usedSounds.size;
+          alert(`先生が指定した楽曲を読み込みました！\n使用されている${soundCount}個の音素材を音ライブラリーに追加しました。`);
         } catch (error) {
           console.error('インポートされた楽曲の読み込みに失敗:', error);
         }
@@ -882,11 +1085,27 @@ const DAWPage = () => {
         // 拍または秒に合わせて位置を調整
         const snappedPosition = Math.max(0, getSnapPosition(adjustedPosition));
         
+        // ターゲットトラックのクリップを取得
+        const targetTrack = tracks.find(track => track.id === trackId);
+        if (!targetTrack) {
+          console.error('ターゲットトラックが見つかりません');
+          setDraggedClip(null);
+          setDragOffset(0);
+          return;
+        }
+
+        // 重ならない位置を計算（自分自身は除外）
+        const nonOverlappingPosition = findNonOverlappingPosition(
+          targetTrack.clips,
+          snappedPosition,
+          draggedClip.duration,
+          draggedClip.id
+        );
         
         // 既存クリップの移動
         const updatedClip = {
           ...draggedClip,
-          startTime: snappedPosition,
+          startTime: nonOverlappingPosition,
           trackId: trackId
         };
 
@@ -977,10 +1196,16 @@ const DAWPage = () => {
       // 新しい音素材の場合は通常のスナップ処理
       const snappedPosition = getSnapPosition(timePosition);
 
+      // ターゲットトラックのクリップを取得して重ならない位置を計算
+      const targetTrack = tracks.find(track => track.id === trackId);
+      const nonOverlappingPosition = targetTrack 
+        ? findNonOverlappingPosition(targetTrack.clips, snappedPosition, duration)
+        : snappedPosition;
+
       const newClip = {
         id: Date.now() + Math.random(), // より確実にユニークなIDを生成
         soundData: soundData,
-        startTime: snappedPosition,
+        startTime: nonOverlappingPosition,
         duration: duration,
         trackId: trackId
       };
@@ -1191,7 +1416,7 @@ const DAWPage = () => {
   // ドラッグ終了時のクリーンアップ
   const handleDragEnd = (e) => {
     // タイムラインエリアの外にドロップされた場合、クリップを削除
-    if (draggedClip && timelineRef.current) {
+    if (draggedClip && timelineRef.current && e && e.clientX !== undefined && e.clientY !== undefined) {
       const timelineRect = timelineRef.current.getBoundingClientRect();
       const dropX = e.clientX;
       const dropY = e.clientY;
@@ -1892,8 +2117,13 @@ const SoundItem = ({ sound, onDragStart }) => {
   const [isDragging, setIsDragging] = useState(false);
   const [touchStart, setTouchStart] = useState(null);
   const [touchMove, setTouchMove] = useState(null);
+  const audioRef = useRef(null);
+  const audioUrlRef = useRef(null);
 
   const handleDragStart = (e) => {
+    // スクロールを無効化
+    document.body.classList.add('dragging');
+    
     // audioBlob以外のデータをJSON文字列として設定
     const soundDataForTransfer = {
       ...sound,
@@ -1928,11 +2158,11 @@ const SoundItem = ({ sound, onDragStart }) => {
     const currentPos = { x: touch.clientX, y: touch.clientY };
     setTouchMove(currentPos);
     
-    // ドラッグ開始の判定（15px以上移動）- 閾値を上げてより意図的な移動のみドラッグ扱い
+    // ドラッグ開始の判定（5px以上移動）- より即座に反応するように閾値を下げる
     const deltaX = Math.abs(currentPos.x - touchStart.x);
     const deltaY = Math.abs(currentPos.y - touchStart.y);
     
-    if (!isDragging && (deltaX > 15 || deltaY > 15)) {
+    if (!isDragging && (deltaX > 5 || deltaY > 5)) {
       setIsDragging(true);
       // スクロールを一時的に無効化（移動が確定してから）
       document.body.classList.add('dragging');
@@ -2036,11 +2266,12 @@ const SoundItem = ({ sound, onDragStart }) => {
       }
       
       const audio = new Audio();
-      let audioUrl;
       
       try {
-        audioUrl = URL.createObjectURL(sound.audioBlob);
+        const audioUrl = URL.createObjectURL(sound.audioBlob);
+        audioUrlRef.current = audioUrl;
         audio.src = audioUrl;
+        audioRef.current = audio;
         
         audio.play()
           .then(() => {
@@ -2048,9 +2279,11 @@ const SoundItem = ({ sound, onDragStart }) => {
             
             const handleEnded = () => {
               setIsPlaying(false);
-              if (audioUrl) {
-                URL.revokeObjectURL(audioUrl); // URLをクリーンアップ
+              if (audioUrlRef.current) {
+                URL.revokeObjectURL(audioUrlRef.current);
+                audioUrlRef.current = null;
               }
+              audioRef.current = null;
               audio.removeEventListener('ended', handleEnded);
             };
             
@@ -2060,16 +2293,20 @@ const SoundItem = ({ sound, onDragStart }) => {
             audio.addEventListener('error', (error) => {
               console.error('音声読み込みエラー:', error);
               setIsPlaying(false);
-              if (audioUrl) {
-                URL.revokeObjectURL(audioUrl);
+              if (audioUrlRef.current) {
+                URL.revokeObjectURL(audioUrlRef.current);
+                audioUrlRef.current = null;
               }
+              audioRef.current = null;
             });
           })
           .catch(error => {
             console.error('音声再生エラー:', error);
-            if (audioUrl) {
-              URL.revokeObjectURL(audioUrl); // エラー時もクリーンアップ
+            if (audioUrlRef.current) {
+              URL.revokeObjectURL(audioUrlRef.current);
+              audioUrlRef.current = null;
             }
+            audioRef.current = null;
             setIsPlaying(false);
           });
       } catch (error) {
@@ -2083,6 +2320,19 @@ const SoundItem = ({ sound, onDragStart }) => {
         isDragging
       });
     }
+  };
+
+  const stopSound = () => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+      audioRef.current = null;
+    }
+    if (audioUrlRef.current) {
+      URL.revokeObjectURL(audioUrlRef.current);
+      audioUrlRef.current = null;
+    }
+    setIsPlaying(false);
   };
 
   // ドラッグプレビューを作成
@@ -2136,10 +2386,9 @@ const SoundItem = ({ sound, onDragStart }) => {
         <div className="sound-actions">
           <button 
             className="play-sound-btn"
-            onClick={playSound}
-            disabled={isPlaying}
+            onClick={isPlaying ? stopSound : playSound}
           >
-            {isPlaying ? '⏸️' : '▶️'}
+            {isPlaying ? '⏹️' : '▶️'}
           </button>
         </div>
       </div>
@@ -2347,6 +2596,9 @@ const AudioClip = ({ clip, trackId, onRemove, onDragStart, onDragEnd }) => {
 
   const handleDragStart = (e) => {
     e.stopPropagation(); // イベントバブリングを防ぐ
+    
+    // スクロールを無効化
+    document.body.classList.add('dragging');
     
     // ドラッグデータに既存クリップの情報を設定
     e.dataTransfer.setData('text/plain', `existing-clip-${clip.id}`);

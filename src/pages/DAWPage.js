@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import './DAWPage.css';
 
 // DAWの定数（時間ベースのタイムライン）
-const TIME_MODE_TOTAL_SECONDS = 60; // 表示する総秒数
+const TIME_MODE_TOTAL_SECONDS = 90; // 表示する総秒数
 const DEFAULT_PIXELS_PER_SECOND = 100; // デフォルトの1秒あたりのピクセル数
 
 const DAWPage = () => {
@@ -114,6 +114,7 @@ const DAWPage = () => {
   const [filteredSounds, setFilteredSounds] = useState([]); // フィルタリングされた音素材
   const [selectedTag, setSelectedTag] = useState(''); // 選択されたタグ
   const [allTags, setAllTags] = useState([]); // 全タグのリスト
+  const [instructionsExpanded, setInstructionsExpanded] = useState(false); // 使い方の折りたたみ状態
   const [showSoundPanel, setShowSoundPanel] = useState(true);
   const [draggedClip, setDraggedClip] = useState(null);
   const [dragPreview, setDragPreview] = useState(null);
@@ -133,8 +134,11 @@ const DAWPage = () => {
     roomNumber: ''
   });
   const timelineRef = useRef(null);
+  const trackHeadersRef = useRef(null);
+  const timelineContainerRef = useRef(null);
   const animationFrameRef = useRef(null);
   const dragOverTimeoutRef = useRef(null);
+  const isScrollingSyncRef = useRef(false); // スクロール同期中フラグ
 
   useEffect(() => {
     // Web Audio API の初期化
@@ -274,6 +278,56 @@ const DAWPage = () => {
     
     setFilteredSounds(filtered);
   }, [sounds, selectedTag]);
+
+  // トラックヘッダーとタイムラインコンテナのスクロール同期
+  useEffect(() => {
+    const trackHeaders = trackHeadersRef.current;
+    const timelineContainer = timelineContainerRef.current;
+
+    if (!trackHeaders || !timelineContainer) {
+      return;
+    }
+
+    // トラックヘッダーのスクロールイベントハンドラ
+    const handleTrackHeadersScroll = () => {
+      if (isScrollingSyncRef.current) {
+        return;
+      }
+      
+      isScrollingSyncRef.current = true;
+      timelineContainer.scrollTop = trackHeaders.scrollTop;
+      
+      // 次のフレームでフラグをリセット
+      requestAnimationFrame(() => {
+        isScrollingSyncRef.current = false;
+      });
+    };
+
+    // タイムラインコンテナのスクロールイベントハンドラ
+    const handleTimelineContainerScroll = () => {
+      if (isScrollingSyncRef.current) {
+        return;
+      }
+      
+      isScrollingSyncRef.current = true;
+      trackHeaders.scrollTop = timelineContainer.scrollTop;
+      
+      // 次のフレームでフラグをリセット
+      requestAnimationFrame(() => {
+        isScrollingSyncRef.current = false;
+      });
+    };
+
+    // イベントリスナーを追加
+    trackHeaders.addEventListener('scroll', handleTrackHeadersScroll);
+    timelineContainer.addEventListener('scroll', handleTimelineContainerScroll);
+
+    // クリーンアップ
+    return () => {
+      trackHeaders.removeEventListener('scroll', handleTrackHeadersScroll);
+      timelineContainer.removeEventListener('scroll', handleTimelineContainerScroll);
+    };
+  }, []);
 
   // 音声ファイルの継続時間を取得してピクセル幅に変換
   const getAudioDuration = useCallback((audioBlob, currentPixelsPerSecond = pixelsPerSecond) => {
@@ -1536,6 +1590,29 @@ const DAWPage = () => {
     cleanupDragState();
   };
 
+  // onDragStartハンドラーをメモ化
+  const handleSoundDragStart = useCallback(async (sound) => {
+    console.log('onDragStart呼び出し:', sound.name);
+    // ドラッグ開始時に音声の長さを計算
+    if (sound.audioBlob) {
+      try {
+        const duration = await getAudioDuration(sound.audioBlob, pixelsPerSecond);
+        console.log('音声の長さ計算完了:', duration, 'ピクセル');
+        setDraggedSoundDuration(duration);
+        // グローバル変数にも保存（ドロップ時に使用）
+        window.currentDraggedSoundDuration = duration;
+      } catch (error) {
+        console.warn('ドラッグ時の音声長さ計算に失敗:', error);
+        setDraggedSoundDuration(400);
+        window.currentDraggedSoundDuration = 400;
+      }
+    } else {
+      console.warn('audioBlobが見つかりません');
+      setDraggedSoundDuration(400);
+      window.currentDraggedSoundDuration = 400;
+    }
+  }, [getAudioDuration, pixelsPerSecond]);
+
   const play = async () => {
     try {
       // AudioContextが中断されている場合は再開
@@ -2011,30 +2088,10 @@ const DAWPage = () => {
             {sounds.length > 0 ? (
               filteredSounds.length > 0 ? (
                 filteredSounds.map(sound => (
-                <SoundItem 
+                <MemoizedSoundItem 
                   key={sound.id} 
                   sound={sound} 
-                  onDragStart={async (sound) => {
-                    console.log('onDragStart呼び出し:', sound.name);
-                    // ドラッグ開始時に音声の長さを計算
-                    if (sound.audioBlob) {
-                      try {
-                        const duration = await getAudioDuration(sound.audioBlob, pixelsPerSecond);
-                        console.log('音声の長さ計算完了:', duration, 'ピクセル');
-                        setDraggedSoundDuration(duration);
-                        // グローバル変数にも保存（ドロップ時に使用）
-                        window.currentDraggedSoundDuration = duration;
-                      } catch (error) {
-                        console.warn('ドラッグ時の音声長さ計算に失敗:', error);
-                        setDraggedSoundDuration(400);
-                        window.currentDraggedSoundDuration = 400;
-                      }
-                    } else {
-                      console.warn('audioBlobが見つかりません');
-                      setDraggedSoundDuration(400);
-                      window.currentDraggedSoundDuration = 400;
-                    }
-                  }}
+                  onDragStart={handleSoundDragStart}
                 />
               ))
               ) : (
@@ -2058,7 +2115,7 @@ const DAWPage = () => {
         </div>
 
         <div className={`daw-workspace ${!showSoundPanel ? 'panel-hidden' : ''}`}>
-          <div className="track-headers">
+          <div className="track-headers" ref={trackHeadersRef}>
             <div className="timeline-header-spacer">
               タイムライン
             </div>
@@ -2078,7 +2135,7 @@ const DAWPage = () => {
             </div>
           </div>
 
-          <div className="timeline-container">
+          <div className="timeline-container" ref={timelineContainerRef}>
             <Timeline pixelsPerSecond={pixelsPerSecond} />
             <div 
               className="tracks-area" 
@@ -2117,41 +2174,18 @@ const DAWPage = () => {
         </div>
       </div>
 
-      <div className="instructions card">
-        <h3>📖 使い方</h3>
-        <ul>
-          <li><strong>🖥️ PC:</strong> 左側の音素材パネルから音素材をトラックにドラッグ&ドロップして配置</li>
-          <li><strong>📱 スマホ/タブレット:</strong> 音素材を長押ししてからトラックまでドラッグして配置</li>
-          <li>配置済みの音素材もドラッグして別の場所に移動できます</li>
-          <li>ドラッグ中は配置予定位置に青い影が表示されます</li>
-          <li><strong>🔍 ズーム機能:</strong> ＋／－ボタンでタイムラインの表示倍率を変更できます</li>
-          <li>タイムラインは秒数ベースで、0.1秒単位で音素材を配置できます</li>
-          <li>音素材パネルの▶️ボタンで個別に音を確認できます</li>
-          <li>▶️ボタンで再生、⏸️ボタンで一時停止、⏹️ボタンで停止</li>
-          <li>トラックを追加して複数の音を重ねることができます</li>
-          <li><strong>💾 プロジェクト保存:</strong> 編集中のデータをJSONファイルとして保存</li>
-          <li><strong>📁 プロジェクト読み込み:</strong> 保存したプロジェクトファイルを読み込んで編集を再開</li>
-          <li><strong>🎧 音源出力:</strong> 完成した楽曲をWAVファイルとして出力</li>
-          <li><strong>🗑️ リセット:</strong> 現在のプロジェクトをリセットして新しく始める</li>
-        </ul>
-        <div className="auto-save-info">
-          <h4>💾 自動保存機能</h4>
-          <ul>
-            <li><strong>自動保存:</strong> トラックとズーム倍率の変更は自動的に保存されます</li>
-            <li><strong>他ページとの連携:</strong> 「音あつめ」ページで録音した音は自動的に反映されます</li>
-            <li><strong>復元機能:</strong> ページをリロードしても作業内容が自動的に復元されます</li>
-            <li><strong>安心して移動:</strong> 他のページに移動しても作業内容は保持されます</li>
-          </ul>
+      <div className="instructions-collapsible">
+        <div className="instructions-summary" role="button" tabIndex={0} onClick={() => setInstructionsExpanded(prev => !prev)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setInstructionsExpanded(prev => !prev); }}>
+          <span className="instructions-title">📖 使い方</span>
+          <button className="instructions-toggle" aria-expanded={instructionsExpanded} aria-controls="instructions-body">
+            {instructionsExpanded ? '折りたたむ' : '表示'}
+          </button>
         </div>
-        <div className="mobile-tips">
-          <h4>📱 スマートフォン利用のコツ</h4>
-          <ul>
-            <li>音素材を軽く長押しするとドラッグモードになります</li>
-            <li>ドラッグ中は画面がスクロールしないよう制御されます</li>
-            <li>青くハイライトされたトラックで指を離すと音素材が配置されます</li>
-            <li>横画面表示にするとより使いやすくなります</li>
-          </ul>
-        </div>
+        {instructionsExpanded && (
+          <div id="instructions-body">
+            <InstructionsSection />
+          </div>
+        )}
       </div>
 
       {/* クラウド保存ダイアログ */}
@@ -2632,6 +2666,13 @@ const SoundItem = ({ sound, onDragStart }) => {
   );
 };
 
+// SoundItemをメモ化して不要な再レンダリングを防ぐ
+const MemoizedSoundItem = React.memo(SoundItem, (prevProps, nextProps) => {
+  // sound.idとonDragStartが変わらなければ再レンダリングしない
+  return prevProps.sound.id === nextProps.sound.id &&
+         prevProps.onDragStart === nextProps.onDragStart;
+});
+
 const TrackHeader = ({ track, onRemove, trackHeight, trackIndex }) => {
   // トラック名を表示番号と元の名前で構成
   const displayName = `トラック ${trackIndex + 1}`;
@@ -2996,6 +3037,50 @@ const AudioClip = ({ clip, trackId, onRemove, onDragStart, onDragEnd }) => {
     </div>
   );
 };
+
+// 使い方セクション - メモ化して再レンダリングを防ぐ
+const InstructionsSection = React.memo(() => {
+  return (
+    <div className="instructions card">
+      <h3>📖 使い方</h3>
+      <ul>
+        <li><strong>🖥️ PC:</strong> 左側の音素材パネルから音素材をトラックにドラッグ&ドロップして配置</li>
+        <li><strong>📱 スマホ/タブレット:</strong> 音素材を長押ししてからトラックまでドラッグして配置</li>
+        <li>配置済みの音素材もドラッグして別の場所に移動できます</li>
+        <li>ドラッグ中は配置予定位置に青い影が表示されます</li>
+        <li><strong>🔍 ズーム機能:</strong> ＋／－ボタンでタイムラインの表示倍率を変更できます</li>
+        <li>タイムラインは秒数ベースで、0.1秒単位で音素材を配置できます</li>
+        <li>音素材パネルの▶️ボタンで個別に音を確認できます</li>
+        <li>▶️ボタンで再生、⏸️ボタンで一時停止、⏹️ボタンで停止</li>
+        <li>トラックを追加して複数の音を重ねることができます</li>
+        <li><strong>💾 プロジェクト保存:</strong> 編集中のデータをJSONファイルとして保存</li>
+        <li><strong>📁 プロジェクト読み込み:</strong> 保存したプロジェクトファイルを読み込んで編集を再開</li>
+        <li><strong>🎧 音源出力:</strong> 完成した楽曲をWAVファイルとして出力</li>
+        <li><strong>🗑️ リセット:</strong> 現在のプロジェクトをリセットして新しく始める</li>
+      </ul>
+      <div className="auto-save-info">
+        <h4>💾 自動保存機能</h4>
+        <ul>
+          <li><strong>自動保存:</strong> トラックとズーム倍率の変更は自動的に保存されます</li>
+          <li><strong>他ページとの連携:</strong> 「音あつめ」ページで録音した音は自動的に反映されます</li>
+          <li><strong>復元機能:</strong> ページをリロードしても作業内容が自動的に復元されます</li>
+          <li><strong>安心して移動:</strong> 他のページに移動しても作業内容は保持されます</li>
+        </ul>
+      </div>
+      <div className="mobile-tips">
+        <h4>📱 スマートフォン利用のコツ</h4>
+        <ul>
+          <li>音素材を軽く長押しするとドラッグモードになります</li>
+          <li>ドラッグ中は画面がスクロールしないよう制御されます</li>
+          <li>青くハイライトされたトラックで指を離すと音素材が配置されます</li>
+          <li>横画面表示にするとより使いやすくなります</li>
+        </ul>
+      </div>
+    </div>
+  );
+});
+
+InstructionsSection.displayName = 'InstructionsSection';
 
 const Playhead = ({ currentTime }) => {
   // currentTimeが有効な数値かチェック

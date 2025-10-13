@@ -381,13 +381,15 @@
 }
 
 .track-headers {
-  width: 200px;
+  width: 150px;
   background: #f8f9fa;
   border-right: 2px solid var(--border-color);
   overflow-y: auto;
+  overflow-x: hidden;
   height: 100%;
   display: flex;
   flex-direction: column;
+  scroll-behavior: smooth;
 }
 
 .track-header {
@@ -470,6 +472,7 @@
   display: flex;
   flex-direction: column;
   transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  scroll-behavior: smooth;
 }
 
 .timeline-header-spacer {
@@ -1338,6 +1341,43 @@ body.dragging .tracks-area {
   margin-bottom: 5px;
   font-size: 14px;
   color: #666;
+}
+
+/* 折りたたみ式の使い方セクション */
+.instructions-collapsible {
+  margin-top: 16px;
+}
+
+.instructions-summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #f8f9fa;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #e9ecef;
+  cursor: pointer;
+}
+
+.instructions-summary:focus {
+  outline: 2px solid rgba(102,126,234,0.4);
+}
+
+.instructions-title {
+  font-weight: 700;
+}
+
+.instructions-toggle {
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  color: #fff;
+  border: none;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+#instructions-body {
+  margin-top: 10px;
 }
 
 /* スマートフォン表示での調整 */

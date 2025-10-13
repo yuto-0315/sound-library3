@@ -111,6 +111,9 @@ const DAWPage = () => {
   const [startPlayTime, setStartPlayTime] = useState(null);
   const [error, setError] = useState(null);
   const [sounds, setSounds] = useState([]);
+  const [filteredSounds, setFilteredSounds] = useState([]); // フィルタリングされた音素材
+  const [selectedTag, setSelectedTag] = useState(''); // 選択されたタグ
+  const [allTags, setAllTags] = useState([]); // 全タグのリスト
   const [showSoundPanel, setShowSoundPanel] = useState(true);
   const [draggedClip, setDraggedClip] = useState(null);
   const [dragPreview, setDragPreview] = useState(null);
@@ -205,6 +208,11 @@ const DAWPage = () => {
     });
     
     setSounds(validSounds);
+    setFilteredSounds(validSounds);
+    
+    // 全てのタグを取得
+    const tags = [...new Set(validSounds.flatMap(sound => sound.tags || []))];
+    setAllTags(tags);
     
     // 無効な音素材があった場合はLocalStorageを更新
     if (validSounds.length !== soundsWithBlob.length) {
@@ -253,6 +261,19 @@ const DAWPage = () => {
       }
     };
   }, []);
+
+  // タグによるフィルタリング
+  useEffect(() => {
+    let filtered = sounds;
+    
+    if (selectedTag) {
+      filtered = filtered.filter(sound => 
+        sound.tags && sound.tags.includes(selectedTag)
+      );
+    }
+    
+    setFilteredSounds(filtered);
+  }, [sounds, selectedTag]);
 
   // 音声ファイルの継続時間を取得してピクセル幅に変換
   const getAudioDuration = useCallback((audioBlob, currentPixelsPerSecond = pixelsPerSecond) => {
@@ -1168,17 +1189,60 @@ const DAWPage = () => {
       }
       
       // グローバル変数からaudioBlobを復元
+      console.log('audioBlob復元前:', {
+        hasGlobalBlob: !!window.currentDraggedSoundBlob,
+        hasAudioData: !!soundData.audioData,
+        soundName: soundData.name
+      });
+      
       if (window.currentDraggedSoundBlob) {
         soundData.audioBlob = window.currentDraggedSoundBlob;
-        window.currentDraggedSoundBlob = null; // クリーンアップ
+        console.log('audioBlob復元成功:', {
+          isBlob: soundData.audioBlob instanceof Blob,
+          size: soundData.audioBlob?.size
+        });
+      } else if (soundData.audioData) {
+        // audioDataからBlobを再生成
+        console.log('audioDataからBlob再生成を試みます');
+        try {
+          const byteCharacters = atob(soundData.audioData.split(',')[1]);
+          const byteNumbers = new Array(byteCharacters.length);
+          for (let i = 0; i < byteCharacters.length; i++) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
+          }
+          const byteArray = new Uint8Array(byteNumbers);
+          soundData.audioBlob = new Blob([byteArray], { type: 'audio/wav' });
+          console.log('audioDataからBlob再生成成功:', {
+            isBlob: soundData.audioBlob instanceof Blob,
+            size: soundData.audioBlob?.size
+          });
+        } catch (error) {
+          console.error('audioDataからBlob再生成に失敗:', error);
+        }
       }
       
       // グローバル変数をクリア
-      window.currentDraggedSound = null;
+      if (window.currentDraggedSoundBlob) {
+        window.currentDraggedSoundBlob = null;
+      }
+      if (window.currentDraggedSound) {
+        window.currentDraggedSound = null;
+      }
       
       
       // 音声の実際の継続時間を取得
       let duration = 400; // デフォルト値
+      
+      // audioBlobの状態を詳しくチェック
+      console.log('audioBlob状態チェック:', {
+        hasAudioBlob: !!soundData.audioBlob,
+        isInstanceOfBlob: soundData.audioBlob instanceof Blob,
+        audioBlobType: typeof soundData.audioBlob,
+        audioBlobSize: soundData.audioBlob?.size,
+        hasAudioData: !!soundData.audioData,
+        soundName: soundData.name,
+        hasGlobalDuration: !!window.currentDraggedSoundDuration
+      });
       
       // まずグローバル変数から事前計算された長さを取得
       if (window.currentDraggedSoundDuration && 
@@ -1186,7 +1250,7 @@ const DAWPage = () => {
           window.currentDraggedSoundDuration > 0) {
         duration = window.currentDraggedSoundDuration;
         console.log('事前計算された音声の長さを使用:', duration);
-      } else if (soundData.audioBlob) {
+      } else if (soundData.audioBlob && soundData.audioBlob instanceof Blob && soundData.audioBlob.size > 0) {
         // グローバル変数が無い場合は再計算
         console.log('音声の長さを再計算中...');
         try {
@@ -1197,6 +1261,14 @@ const DAWPage = () => {
           duration = 400;
         }
       } else {
+        console.warn('audioBlobが無効です。クリップ情報:', {
+          hasAudioBlob: !!soundData.audioBlob,
+          isInstanceOfBlob: soundData.audioBlob instanceof Blob,
+          audioBlobType: typeof soundData.audioBlob,
+          hasAudioData: !!soundData.audioData,
+          soundDataName: soundData.name,
+          clipId: Date.now()
+        });
         console.warn('audioBlobが見つかりません。デフォルト値を使用:', duration);
       }
 
@@ -1908,9 +1980,37 @@ const DAWPage = () => {
               ✕
             </button>
           </div>
+          
+          {/* タグフィルター */}
+          {allTags.length > 0 && (
+            <div className="sound-panel-filters">
+              <div className="tag-filter-label">🏷️ タグで絞り込み:</div>
+              <div className="tag-filters-compact">
+                <button
+                  className={`tag-filter-btn-compact ${selectedTag === '' ? 'active' : ''}`}
+                  onClick={() => setSelectedTag('')}
+                  title="すべての音素材を表示"
+                >
+                  すべて
+                </button>
+                {allTags.map(tag => (
+                  <button
+                    key={tag}
+                    className={`tag-filter-btn-compact ${selectedTag === tag ? 'active' : ''}`}
+                    onClick={() => setSelectedTag(tag)}
+                    title={`${tag}でフィルター`}
+                  >
+                    {tag}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          
           <div className="sound-list">
             {sounds.length > 0 ? (
-              sounds.map(sound => (
+              filteredSounds.length > 0 ? (
+                filteredSounds.map(sound => (
                 <SoundItem 
                   key={sound.id} 
                   sound={sound} 
@@ -1937,6 +2037,17 @@ const DAWPage = () => {
                   }}
                 />
               ))
+              ) : (
+                <div className="no-sounds">
+                  <p>選択したタグの音素材がありません</p>
+                  <button 
+                    className="reset-filter-btn"
+                    onClick={() => setSelectedTag('')}
+                  >
+                    フィルターをリセット
+                  </button>
+                </div>
+              )
             ) : (
               <div className="no-sounds">
                 <p>音素材がありません</p>
@@ -2209,21 +2320,34 @@ const SoundItem = ({ sound, onDragStart }) => {
       }
     }, 0);
     
-    // audioBlob以外のデータをJSON文字列として設定
+    // audioBlob以外のデータをJSON文字列として設定（audioDataは含める）
     const soundDataForTransfer = {
       ...sound,
       audioBlob: null // Blobは直接シリアライズできないため一時的にnullに
     };
+    
+    console.log('dataTransferに設定するデータ:', {
+      name: soundDataForTransfer.name,
+      hasAudioData: !!soundDataForTransfer.audioData,
+      audioDataLength: soundDataForTransfer.audioData?.length
+    });
     
     e.dataTransfer.setData('application/json', JSON.stringify(soundDataForTransfer));
     e.dataTransfer.effectAllowed = 'copy';
     
     // 実際のaudioBlobは別途グローバル変数で保持
     window.currentDraggedSoundBlob = sound.audioBlob;
+    console.log('audioBlob設定:', {
+      hasAudioBlob: !!sound.audioBlob,
+      isBlob: sound.audioBlob instanceof Blob,
+      size: sound.audioBlob?.size,
+      hasAudioData: !!sound.audioData
+    });
     
     // キャッシュされた長さがある場合はそれを使用
     if (durationCacheRef.current !== null) {
       window.currentDraggedSoundDuration = durationCacheRef.current;
+      console.log('キャッシュから音声長さを使用:', durationCacheRef.current);
     }
     
     // 親コンポーネントのonDragStart関数を呼び出し（音声の長さを計算）

@@ -458,7 +458,7 @@ const CloudPage = () => {
                     </div>
                     <audio 
                       controls 
-                      src={sound.audioBlob ? URL.createObjectURL(sound.audioBlob) : null}
+                      src={sound.audioData || (sound.audioBlob ? URL.createObjectURL(sound.audioBlob) : null)}
                       className="mini-audio-player"
                       onClick={(e) => e.stopPropagation()}
                     >

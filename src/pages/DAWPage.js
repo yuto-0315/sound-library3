@@ -141,9 +141,52 @@ const DAWPage = () => {
   const isScrollingSyncRef = useRef(false); // スクロール同期中フラグ
 
   useEffect(() => {
+    // デバイス情報をログに記録（デバッグ用）
+    console.log('=== Device Information ===');
+    console.log('User Agent:', navigator.userAgent);
+    console.log('Platform:', navigator.platform);
+    console.log('iOS Device:', /iPad|iPhone|iPod/.test(navigator.userAgent));
+    console.log('Safari:', /^((?!chrome|android).)*safari/i.test(navigator.userAgent));
+    console.log('Touch Support:', 'ontouchstart' in window);
+    console.log('Audio Support:', {
+      canPlayWav: document.createElement('audio').canPlayType('audio/wav'),
+      canPlayMp3: document.createElement('audio').canPlayType('audio/mpeg'),
+      canPlayOgg: document.createElement('audio').canPlayType('audio/ogg')
+    });
+    console.log('========================');
+    
     // Web Audio API の初期化
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
     setAudioContext(ctx);
+    console.log('AudioContext initialized. State:', ctx.state);
+    
+    // iPad/iOS対策: ユーザー操作でAudioContextを再開
+    const resumeAudioContext = () => {
+      if (!ctx || ctx.state === 'closed') {
+        console.warn('⚠️ AudioContext is closed or not initialized');
+        return;
+      }
+      
+      if (ctx.state === 'suspended') {
+        console.log('⚠️ AudioContext is suspended. Attempting to resume...');
+        ctx.resume().then(() => {
+          console.log('✓ AudioContext resumed successfully. State:', ctx.state);
+        }).catch(err => {
+          // AudioDestinationNode初期化エラーを無視（Safariの既知の問題）
+          if (err.name === 'InvalidStateError') {
+            console.warn('⚠️ AudioContext resume skipped (not ready yet):', err.message);
+          } else {
+            console.error('❌ AudioContext resume failed:', err);
+          }
+        });
+      } else {
+        console.log('✓ AudioContext is already running. State:', ctx.state);
+      }
+    };
+    
+    // 最初のタッチやクリックでAudioContextを再開
+    document.addEventListener('touchstart', resumeAudioContext, { once: true });
+    document.addEventListener('click', resumeAudioContext, { once: true });
     
     // LocalStorageから音素材を読み込み
     const savedSounds = JSON.parse(localStorage.getItem('soundRecordings') || '[]');
@@ -1614,10 +1657,18 @@ const DAWPage = () => {
   }, [getAudioDuration, pixelsPerSecond]);
 
   const play = async () => {
+    console.log('=== Play Button Clicked ===');
+    console.log('Current Time:', currentTime);
+    console.log('AudioContext State:', audioContext?.state);
+    console.log('Number of Tracks:', tracks.length);
+    console.log('Total Clips:', tracks.reduce((sum, track) => sum + track.clips.length, 0));
+    
     try {
-      // AudioContextが中断されている場合は再開
+      // iPad/iOS対策: AudioContextが中断されている場合は再開
       if (audioContext && audioContext.state === 'suspended') {
+        console.log('⚠️ Resuming suspended AudioContext...');
         await audioContext.resume();
+        console.log('✓ AudioContext state after resume:', audioContext.state);
       }
       
       setIsPlaying(true);
@@ -1675,27 +1726,155 @@ const DAWPage = () => {
     if (clip.soundData && clip.soundData.audioBlob && clip.soundData.audioBlob instanceof Blob) {
       try {
         const audio = new Audio();
-        const audioUrl = URL.createObjectURL(clip.soundData.audioBlob);
-        audio.src = audioUrl;
         
-        const timeoutId = setTimeout(() => {
-          // クリップのオフセット位置から再生を開始
-          if (clipOffset > 0) {
-            audio.currentTime = clipOffset;
-          }
-          
-          audio.play().catch(error => {
-            console.error('音声再生エラー:', error);
-            URL.revokeObjectURL(audioUrl); // メモリリークを防ぐ
+        // iPad/iOS対策: audioDataがある場合はData URLを使用（より確実）
+        let audioUrl;
+        let useDataUrl = false;
+        
+        if (clip.soundData.audioData) {
+          // Data URL方式（iOS/iPadでより安定）
+          audio.src = clip.soundData.audioData;
+          useDataUrl = true;
+          console.log('Using Data URL for clip:', clip.id);
+        } else {
+          // Blob URL方式（フォールバック）
+          audioUrl = URL.createObjectURL(clip.soundData.audioBlob);
+          audio.src = audioUrl;
+          console.log('Using Blob URL for clip:', clip.id);
+        }
+        
+        // iPad/iOS対策: 音声の設定を明示的に行う
+        audio.preload = 'auto';
+        audio.volume = 1.0;
+        audio.muted = false;
+        audio.playsInline = true; // iOS対策: インライン再生を有効化
+        
+        // iPad/iOS対策: ロード完了を確実に待つ
+        let isLoaded = false;
+        let canPlayTriggered = false;
+        
+        audio.addEventListener('loadeddata', () => {
+          isLoaded = true;
+          console.log('✓ Audio loaded successfully for clip:', clip.id, {
+            duration: audio.duration,
+            readyState: audio.readyState
           });
-        }, delayMs);
-        
-        // 音声終了時にURLを解放
-        audio.addEventListener('ended', () => {
-          URL.revokeObjectURL(audioUrl);
         });
         
-        playingAudiosMap.set(clip.id, { audio, timeoutId, audioUrl });
+        audio.addEventListener('canplay', () => {
+          canPlayTriggered = true;
+          console.log('✓ Audio can play for clip:', clip.id);
+        });
+        
+        audio.addEventListener('canplaythrough', () => {
+          console.log('✓ Audio can play through for clip:', clip.id);
+        });
+        
+        audio.addEventListener('error', (e) => {
+          console.error('❌ Audio load error for clip:', clip.id, e);
+          console.error('Audio error details:', {
+            error: audio.error,
+            errorCode: audio.error?.code,
+            errorMessage: audio.error?.message,
+            readyState: audio.readyState,
+            networkState: audio.networkState,
+            src: audio.src.substring(0, 50) + '...'
+          });
+        });
+        
+        // iPad/iOS対策: loadメソッドを呼び出して音声を準備
+        audio.load();
+        
+        const timeoutId = setTimeout(async () => {
+          // ロード完了を待つ（最大2秒）
+          const waitForLoad = new Promise((resolve) => {
+            if (isLoaded || canPlayTriggered || audio.readyState >= 2) {
+              resolve(true);
+              return;
+            }
+            
+            const checkInterval = setInterval(() => {
+              if (isLoaded || canPlayTriggered || audio.readyState >= 2) {
+                clearInterval(checkInterval);
+                resolve(true);
+              }
+            }, 50);
+            
+            // タイムアウト: 2秒後
+            setTimeout(() => {
+              clearInterval(checkInterval);
+              console.warn('⚠️ Audio load timeout for clip:', clip.id, {
+                readyState: audio.readyState,
+                isLoaded,
+                canPlayTriggered
+              });
+              resolve(false);
+            }, 2000);
+          });
+          
+          await waitForLoad;
+          
+          // クリップのオフセット位置から再生を開始
+          if (clipOffset > 0) {
+            try {
+              audio.currentTime = clipOffset;
+            } catch (error) {
+              console.error('Failed to set currentTime:', error);
+            }
+          }
+          
+          // 再生開始のログ
+          console.log('🎵 Attempting to play clip:', clip.id, {
+            readyState: audio.readyState,
+            networkState: audio.networkState,
+            duration: audio.duration,
+            currentTime: audio.currentTime,
+            volume: audio.volume,
+            muted: audio.muted,
+            paused: audio.paused
+          });
+          
+          // iPad/iOS対策: 再生前に音声が準備できているか確認
+          const playPromise = audio.play();
+          if (playPromise !== undefined) {
+            playPromise
+              .then(() => {
+                console.log('✓ Playback started successfully for clip:', clip.id);
+              })
+              .catch(error => {
+                console.error('❌ 音声再生エラー:', error.name, error.message);
+                // iOS Safari特有のエラーログ
+                console.error('Audio state at error:', {
+                  readyState: audio.readyState,
+                  networkState: audio.networkState,
+                  error: audio.error,
+                  errorCode: audio.error?.code,
+                  src: useDataUrl ? 'Data URL' : 'Blob URL',
+                  currentTime: audio.currentTime,
+                  duration: audio.duration,
+                  paused: audio.paused,
+                  volume: audio.volume,
+                  muted: audio.muted,
+                  played: audio.played.length
+                });
+                
+                // Blob URLの場合のみクリーンアップ
+                if (!useDataUrl && audioUrl) {
+                  URL.revokeObjectURL(audioUrl);
+                }
+              });
+          }
+        }, delayMs);
+        
+        // 音声終了時の処理
+        audio.addEventListener('ended', () => {
+          console.log('✓ Audio playback ended for clip:', clip.id);
+          if (!useDataUrl && audioUrl) {
+            URL.revokeObjectURL(audioUrl);
+          }
+        });
+        
+        playingAudiosMap.set(clip.id, { audio, timeoutId, audioUrl: useDataUrl ? null : audioUrl });
       } catch (error) {
         console.error('createObjectURL エラー:', error, 'audioBlob:', clip.soundData.audioBlob);
       }
@@ -2426,6 +2605,18 @@ const SoundItem = ({ sound, onDragStart }) => {
       document.body.style.width = '100%';
       document.body.style.height = '100%';
       
+      // タッチドラッグ用にグローバル変数を設定
+      window.currentDraggedSound = {
+        ...sound,
+        audioBlob: null // Blobは別途設定
+      };
+      window.currentDraggedSoundBlob = sound.audioBlob;
+      console.log('タッチドラッグ開始 - グローバル変数設定:', {
+        name: sound.name,
+        hasAudioData: !!sound.audioData,
+        hasAudioBlob: !!sound.audioBlob
+      });
+      
       // 親コンポーネントのonDragStart関数を呼び出し（非同期）
       if (onDragStart) {
         // 非同期で音声の長さを計算（待たない）
@@ -2535,51 +2726,147 @@ const SoundItem = ({ sound, onDragStart }) => {
       }
       
       const audio = new Audio();
+      // 重要: audioRefに先に格納してGCを防ぐ
+      audioRef.current = audio;
       
       try {
-        const audioUrl = URL.createObjectURL(sound.audioBlob);
-        audioUrlRef.current = audioUrl;
-        audio.src = audioUrl;
-        audioRef.current = audio;
+        // iPad/iOS対策: audioDataがある場合はData URLを優先使用
+        let useDataUrl = false;
+        if (sound.audioData) {
+          audio.src = sound.audioData;
+          useDataUrl = true;
+          console.log('🎵 Using Data URL for preview:', sound.name);
+        } else {
+          const audioUrl = URL.createObjectURL(sound.audioBlob);
+          audioUrlRef.current = audioUrl;
+          audio.src = audioUrl;
+          console.log('🎵 Using Blob URL for preview:', sound.name);
+        }
         
-        audio.play()
-          .then(() => {
-            setIsPlaying(true);
-            
-            const handleEnded = () => {
-              setIsPlaying(false);
-              if (audioUrlRef.current) {
-                URL.revokeObjectURL(audioUrlRef.current);
-                audioUrlRef.current = null;
-              }
-              audioRef.current = null;
-              audio.removeEventListener('ended', handleEnded);
-            };
-            
-            audio.addEventListener('ended', handleEnded);
-            
-            // 音声の読み込みエラーもハンドリング
-            audio.addEventListener('error', (error) => {
-              console.error('音声読み込みエラー:', error);
-              setIsPlaying(false);
-              if (audioUrlRef.current) {
-                URL.revokeObjectURL(audioUrlRef.current);
-                audioUrlRef.current = null;
-              }
-              audioRef.current = null;
-            });
-          })
-          .catch(error => {
-            console.error('音声再生エラー:', error);
-            if (audioUrlRef.current) {
-              URL.revokeObjectURL(audioUrlRef.current);
-              audioUrlRef.current = null;
-            }
-            audioRef.current = null;
-            setIsPlaying(false);
+        // iPad/iOS対策: 音声の設定を明示的に行う
+        audio.preload = 'auto';
+        audio.volume = 1.0;
+        audio.muted = false;
+        audio.playsInline = true; // iOS対策: インライン再生を有効化
+        
+        // iPad/iOS対策: ロード状態を監視
+        let isLoaded = false;
+        let canPlayTriggered = false;
+        
+        audio.addEventListener('loadeddata', () => {
+          isLoaded = true;
+          console.log('✓ Preview audio loaded:', sound.name, {
+            duration: audio.duration,
+            readyState: audio.readyState
           });
+        });
+        
+        audio.addEventListener('canplay', () => {
+          canPlayTriggered = true;
+          console.log('✓ Preview audio can play:', sound.name);
+        });
+        
+        audio.addEventListener('canplaythrough', () => {
+          console.log('✓ Preview audio can play through:', sound.name);
+        });
+        
+        audio.addEventListener('error', (e) => {
+          console.error('❌ Preview audio error:', sound.name, e);
+          console.error('Error details:', {
+            error: audio.error,
+            errorCode: audio.error?.code,
+            errorMessage: audio.error?.message,
+            readyState: audio.readyState,
+            networkState: audio.networkState
+          });
+        });
+        
+        // iPad/iOS対策: loadメソッドを呼び出して音声を準備
+        audio.load();
+        
+        // ロード完了を待ってから再生
+        const attemptPlay = async () => {
+          // ロード完了を待つ（最大2秒）
+          const waitForLoad = new Promise((resolve) => {
+            if (isLoaded || canPlayTriggered || audio.readyState >= 2) {
+              resolve(true);
+              return;
+            }
+            
+            const checkInterval = setInterval(() => {
+              if (isLoaded || canPlayTriggered || audio.readyState >= 2) {
+                clearInterval(checkInterval);
+                resolve(true);
+              }
+            }, 50);
+            
+            setTimeout(() => {
+              clearInterval(checkInterval);
+              console.warn('⚠️ Preview audio load timeout:', sound.name, {
+                readyState: audio.readyState,
+                isLoaded,
+                canPlayTriggered
+              });
+              resolve(false);
+            }, 2000);
+          });
+          
+          await waitForLoad;
+          
+          console.log('🎵 Attempting to play preview:', sound.name, {
+            readyState: audio.readyState,
+            duration: audio.duration,
+            volume: audio.volume,
+            muted: audio.muted
+          });
+          
+          // iPad/iOS対策: 再生処理
+          const playPromise = audio.play();
+          
+          if (playPromise !== undefined) {
+            playPromise
+              .then(() => {
+                console.log('✓ Preview playback started:', sound.name);
+                setIsPlaying(true);
+                
+                const handleEnded = () => {
+                  setIsPlaying(false);
+                  if (!useDataUrl && audioUrlRef.current) {
+                    URL.revokeObjectURL(audioUrlRef.current);
+                    audioUrlRef.current = null;
+                  }
+                  audioRef.current = null;
+                  audio.removeEventListener('ended', handleEnded);
+                };
+                
+                audio.addEventListener('ended', handleEnded);
+              })
+              .catch(error => {
+                console.error('❌ Preview playback error:', error.name, error.message);
+                console.error('Audio state:', {
+                  readyState: audio.readyState,
+                  networkState: audio.networkState,
+                  error: audio.error,
+                  errorCode: audio.error?.code,
+                  duration: audio.duration,
+                  volume: audio.volume,
+                  muted: audio.muted
+                });
+                if (!useDataUrl && audioUrlRef.current) {
+                  URL.revokeObjectURL(audioUrlRef.current);
+                  audioUrlRef.current = null;
+                }
+                audioRef.current = null;
+                setIsPlaying(false);
+              });
+          }
+        };
+        
+        // 再生を試みる
+        attemptPlay();
+        
       } catch (error) {
-        console.error('createObjectURLエラー:', error);
+        console.error('❌ createObjectURL/setup error:', error);
         setIsPlaying(false);
       }
     } else {

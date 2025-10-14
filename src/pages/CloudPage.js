@@ -313,28 +313,104 @@ const CloudPage = () => {
         throw new Error('音声ファイルの読み込みに失敗しました');
       }
       
-      const audioBlob = await response.blob();
-      const audioUrl = URL.createObjectURL(audioBlob);
+      // レスポンスのContent-Typeを確認
+      const contentType = response.headers.get('content-type');
+      console.log('📥 CloudPage: Response Content-Type:', contentType, 'for file:', audioFile.file_name);
       
-      // Audio要素を作成して再生
-      const audio = new Audio(audioUrl);
+      const audioBlob = await response.blob();
+      
+      // Blobのタイプが適切でない場合は audio/wav に変換
+      let finalBlob = audioBlob;
+      if (!audioBlob.type || audioBlob.type === 'application/octet-stream') {
+        console.log('⚠️ Converting blob type to audio/wav for:', audioFile.file_name);
+        finalBlob = new Blob([audioBlob], { type: 'audio/wav' });
+      }
+      
+      console.log('📦 CloudPage: Blob info:', {
+        fileName: audioFile.file_name,
+        blobType: finalBlob.type,
+        blobSize: finalBlob.size,
+        originalType: audioBlob.type
+      });
+      
+      const audioUrl = URL.createObjectURL(finalBlob);
+      
+      // Audio要素を作成して再生（iPad Safari対応）
+      const audio = new Audio();
+      audio.src = audioUrl;
+      audio.preload = 'auto';
+      audio.playsInline = true; // iOS対策
       audioRefs.current[audioFile.id] = audio;
+      
+      console.log('🎵 CloudPage: Attempting to play audio:', audioFile.file_name);
       
       audio.addEventListener('ended', () => {
         setPlayingAudioId(null);
         URL.revokeObjectURL(audioUrl);
         delete audioRefs.current[audioFile.id];
+        console.log('✓ CloudPage: Audio ended:', audioFile.file_name);
       });
       
-      audio.addEventListener('error', () => {
+      audio.addEventListener('error', (e) => {
+        console.error('❌ CloudPage: Audio error:', e, {
+          error: audio.error,
+          errorCode: audio.error?.code,
+          errorMessage: audio.error?.message,
+          readyState: audio.readyState,
+          networkState: audio.networkState
+        });
         setError('音声の再生に失敗しました');
         setPlayingAudioId(null);
         URL.revokeObjectURL(audioUrl);
         delete audioRefs.current[audioFile.id];
       });
       
-      await audio.play();
-      setPlayingAudioId(audioFile.id);
+      audio.addEventListener('loadeddata', () => {
+        console.log('✓ CloudPage: Audio loaded:', audioFile.file_name, {
+          duration: audio.duration,
+          readyState: audio.readyState
+        });
+      });
+      
+      // 音声をロード
+      audio.load();
+      
+      // ロード完了を待ってから再生
+      const playAudio = async () => {
+        // readyStateが十分な状態になるまで待機（最大3秒）
+        const waitForReady = new Promise((resolve) => {
+          if (audio.readyState >= 2) { // HAVE_CURRENT_DATA以上
+            resolve(true);
+            return;
+          }
+          
+          const checkReady = setInterval(() => {
+            if (audio.readyState >= 2) {
+              clearInterval(checkReady);
+              resolve(true);
+            }
+          }, 50);
+          
+          setTimeout(() => {
+            clearInterval(checkReady);
+            console.warn('⚠️ CloudPage: Audio load timeout, trying to play anyway:', audioFile.file_name);
+            resolve(false);
+          }, 3000);
+        });
+        
+        await waitForReady;
+        
+        console.log('🎵 CloudPage: Starting playback:', audioFile.file_name, {
+          readyState: audio.readyState,
+          networkState: audio.networkState
+        });
+        
+        await audio.play();
+        setPlayingAudioId(audioFile.id);
+        console.log('✓ CloudPage: Playback started successfully:', audioFile.file_name);
+      };
+      
+      await playAudio();
       
     } catch (err) {
       setError('音声の再生に失敗しました');
@@ -460,7 +536,18 @@ const CloudPage = () => {
                       controls 
                       src={sound.audioData || (sound.audioBlob ? URL.createObjectURL(sound.audioBlob) : null)}
                       className="mini-audio-player"
+                      preload="auto"
+                      playsInline
                       onClick={(e) => e.stopPropagation()}
+                      onError={(e) => {
+                        console.error('CloudPage音声再生エラー:', e, 'sound:', sound.name);
+                      }}
+                      onLoadStart={() => {
+                        console.log('🎵 Loading audio in CloudPage:', sound.name);
+                      }}
+                      onCanPlay={() => {
+                        console.log('✓ Audio can play in CloudPage:', sound.name);
+                      }}
                     >
                       <track kind="captions" label="音声説明" srcLang="ja" />
                       お使いのブラウザは音声再生に対応していません。

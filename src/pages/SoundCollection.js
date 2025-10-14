@@ -457,8 +457,16 @@ const RecordingEditor = ({ recording, onSave, onCancel }) => {
           controls 
           src={recording.url} 
           className="accessible-audio audio-preview"
+          preload="auto"
+          playsInline
           onError={(e) => {
             console.error('音声プレビューの読み込みエラー:', e);
+          }}
+          onLoadStart={() => {
+            console.log('🎵 Loading preview audio');
+          }}
+          onCanPlay={() => {
+            console.log('✓ Preview audio can play');
           }}
           aria-describedby="audio-preview-desc"
         >
@@ -643,8 +651,16 @@ const SoundCard = ({ recording, index }) => {
           controls 
           src={recording.url}
           className="accessible-audio"
+          preload="auto"
+          playsInline
           onError={(e) => {
             console.error('音声カードの読み込みエラー:', e, 'recording:', recording.name);
+          }}
+          onLoadStart={() => {
+            console.log('🎵 Loading audio:', recording.name);
+          }}
+          onCanPlay={() => {
+            console.log('✓ Audio can play:', recording.name);
           }}
           aria-describedby={`audio-desc-${recording.id}`}
         >

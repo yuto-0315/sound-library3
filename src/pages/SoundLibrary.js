@@ -178,8 +178,10 @@ const LibrarySoundCard = ({ sound, onDelete }) => {
   };
 
   const dragStart = (e) => {
-    e.dataTransfer.setData('application/json', JSON.stringify(sound));
+    // ID方式: 音素材のIDのみを送信
+    e.dataTransfer.setData('text/plain', sound.id);
     e.dataTransfer.effectAllowed = 'copy';
+    console.log('🎵 Drag started with sound ID:', sound.id);
   };
 
   const dragEnd = (e) => {
@@ -226,8 +228,16 @@ const LibrarySoundCard = ({ sound, onDelete }) => {
         controls 
         src={sound.audioData || (sound.audioBlob ? URL.createObjectURL(sound.audioBlob) : null)}
         className="sound-player"
+        preload="auto"
+        playsInline
         onError={(e) => {
           console.error('音声の読み込みエラー:', e, 'sound:', sound.name);
+        }}
+        onLoadStart={() => {
+          console.log('🎵 Loading audio:', sound.name);
+        }}
+        onCanPlay={() => {
+          console.log('✓ Audio can play:', sound.name);
         }}
       >
         <track kind="captions" label="音声説明" srcLang="ja" />

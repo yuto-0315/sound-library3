@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import './DAWPage.css';
+import { getSongData, deleteSongData } from '../utils/indexedDB';
 
 // DAWの定数（時間ベースのタイムライン）
 const TIME_MODE_TOTAL_SECONDS = 90; // 表示する総秒数
@@ -908,10 +909,12 @@ const DAWPage = () => {
   // 先生用管理ページから楽曲を読み込む機能
   useEffect(() => {
     const checkForImportedSong = async () => {
-      const importedSong = localStorage.getItem('daw-import-song');
-      if (importedSong) {
-        try {
-          const songData = JSON.parse(importedSong);
+      try {
+        // IndexedDBから楽曲データを取得
+        const songData = await getSongData();
+        
+        if (songData) {
+          console.log('✓ Song data loaded from IndexedDB');
           
           // プロジェクトデータを復元
           setPixelsPerSecond(songData.pixelsPerSecond || DEFAULT_PIXELS_PER_SECOND);
@@ -1007,14 +1010,14 @@ const DAWPage = () => {
             trackIdCounterRef.current = songData.trackIdCounter;
           }
           
-          // インポート済みデータを削除
-          localStorage.removeItem('daw-import-song');
+          // インポート済みデータをIndexedDBから削除
+          await deleteSongData();
           
           const soundCount = usedSounds.size;
-          alert(`先生が指定した楽曲を読み込みました！\n使用されている${soundCount}個の音素材を音ライブラリーに追加しました。`);
-        } catch (error) {
-          console.error('インポートされた楽曲の読み込みに失敗:', error);
+          alert(`先生が指定した楽曲を読み込みました!\n使用されている${soundCount}個の音素材を音ライブラリーに追加しました。`);
         }
+      } catch (error) {
+        console.error('インポートされた楽曲の読み込みに失敗:', error);
       }
     };
 

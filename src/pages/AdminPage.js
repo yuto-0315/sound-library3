@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import './AdminPage.css';
+import { saveSongData } from '../utils/indexedDB';
 
 const AdminPage = () => {
   const [rooms, setRooms] = useState([]);
@@ -186,13 +187,26 @@ const AdminPage = () => {
     }
   };
 
-  // 楽曲再現（DAWページで開く）
-  const openSongInDAW = (song) => {
-    // 楽曲データをローカルストレージに保存
-    localStorage.setItem('daw-import-song', JSON.stringify(song.song_data));
-    
-    // DAWページを新しいタブで開く
-    window.open('#/daw', '_blank');
+  // 楽曲再現(DAWページで開く)
+  const openSongInDAW = async (song) => {
+    try {
+      // 楽曲データのサイズを確認
+      const songDataStr = JSON.stringify(song.song_data);
+      const sizeInMB = new Blob([songDataStr]).size / 1024 / 1024;
+      console.log(`Song data size: ${sizeInMB.toFixed(2)} MB`);
+      
+      // IndexedDBに保存
+      await saveSongData(song.song_data);
+      console.log('✓ Song data saved to IndexedDB');
+      
+      // DAWページを新しいタブで開く
+      window.open('#/daw', '_blank');
+    } catch (error) {
+      console.error('Failed to save song data:', error);
+      alert('楽曲データの保存に失敗しました。\n' +
+            'ブラウザがIndexedDBをサポートしているか確認してください。\n' +
+            'エラー: ' + error.message);
+    }
   };
 
   return (

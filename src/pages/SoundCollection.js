@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import './SoundCollection.css';
 import { useAnnouncement, useErrorMessages } from '../hooks/useAccessibility';
+import { saveRecording as saveRecordingToDB } from '../utils/indexedDB';
 
 const SoundCollection = () => {
   const [recordings, setRecordings] = useState([]);
@@ -158,6 +159,7 @@ const SoundCollection = () => {
           name: name.trim(),
           tags: tags.filter(tag => tag.trim()).map(tag => tag.trim()),
           audioData: base64Data, // base64データを保存
+          createdAt: currentRecording.createdAt || new Date().toISOString(),
           // audioBlobは一時的なものなので削除
           audioBlob: undefined
         };
@@ -165,11 +167,18 @@ const SoundCollection = () => {
         setRecordings([...recordings, savedRecording]);
         setCurrentRecording(null);
         
-        // LocalStorageに保存（audioBlobは除外）
-        const existingRecordings = JSON.parse(localStorage.getItem('soundRecordings') || '[]');
-        const recordingToSave = { ...savedRecording };
-        delete recordingToSave.audioBlob; // Blobは保存しない
-        localStorage.setItem('soundRecordings', JSON.stringify([...existingRecordings, recordingToSave]));
+        // IndexedDBに保存
+        try {
+          await saveRecordingToDB(savedRecording);
+          console.log('✓ Recording saved to IndexedDB');
+        } catch (dbError) {
+          console.error('IndexedDB保存エラー、localStorageにフォールバック:', dbError);
+          // フォールバック: localStorageに保存
+          const existingRecordings = JSON.parse(localStorage.getItem('soundRecordings') || '[]');
+          const recordingToSave = { ...savedRecording };
+          delete recordingToSave.audioBlob; // Blobは保存しない
+          localStorage.setItem('soundRecordings', JSON.stringify([...existingRecordings, recordingToSave]));
+        }
       } catch (error) {
         console.error('録音の保存に失敗しました:', error);
         alert('録音の保存に失敗しました。再度お試しください。');

@@ -166,6 +166,22 @@
   gap: 8px;
 }
 
+.tag-edit-btn {
+  background: var(--accent-color);
+  color: white;
+  border: none;
+  cursor: pointer;
+  font-size: 16px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+}
+
+.tag-edit-btn:hover {
+  background: var(--primary-color);
+  transform: scale(1.05);
+}
+
 .delete-btn {
   background: var(--warning-color);
   border: none;
@@ -194,6 +210,83 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  align-items: center;
+}
+
+.tag.small {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tag-remove-btn {
+  background: rgba(255, 255, 255, 0.3);
+  border: none;
+  border-radius: 50%;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 0;
+  margin-left: 4px;
+  transition: background 0.2s ease;
+}
+
+.tag-remove-btn:hover {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.tag-editor {
+  margin-top: 10px;
+  padding: 10px;
+  background: rgba(0, 0, 0, 0.02);
+  border-radius: 8px;
+  display: flex;
+  gap: 8px;
+}
+
+.tag-input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 2px solid var(--border-color);
+  border-radius: 6px;
+  font-size: 14px;
+  transition: border-color 0.2s ease;
+}
+
+.tag-input:focus {
+  outline: none;
+  border-color: var(--accent-color);
+}
+
+.add-tag-btn {
+  background: var(--accent-color);
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: bold;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.add-tag-btn:hover {
+  background: var(--primary-color);
+  transform: scale(1.05);
+}
+
+.loading {
+  text-align: center;
+  padding: 40px;
+  font-size: 18px;
+  color: #666;
 }
 
 .sound-player {

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import './SoundLibrary.css';
+import { getAllRecordings, deleteRecording, addTagToRecording, removeTagFromRecording } from '../utils/indexedDB';
 
 const SoundLibrary = () => {
   const [sounds, setSounds] = useState([]);
@@ -7,32 +8,45 @@ const SoundLibrary = () => {
   const [selectedTag, setSelectedTag] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [allTags, setAllTags] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
-    // LocalStorageから音素材を読み込み
-    const savedSounds = JSON.parse(localStorage.getItem('soundRecordings') || '[]');
-    
-    // audioDataからBlobを復元
-    const soundsWithBlob = savedSounds.map(sound => {
-      if (sound.audioData) {
-        try {
-          const blob = base64ToBlob(sound.audioData, 'audio/wav');
-          return { ...sound, audioBlob: blob };
-        } catch (error) {
-          console.error('音声データの復元に失敗:', error);
-          return sound;
-        }
-      }
-      return sound;
-    });
-    
-    setSounds(soundsWithBlob);
-    setFilteredSounds(soundsWithBlob);
-    
-    // 全てのタグを取得
-    const tags = [...new Set(soundsWithBlob.flatMap(sound => sound.tags))];
-    setAllTags(tags);
+    loadSounds();
   }, []);
+
+  const loadSounds = async () => {
+    try {
+      setIsLoading(true);
+      // IndexedDBから音素材を読み込み (localStorageからの自動移行も含む)
+      const savedSounds = await getAllRecordings();
+      
+      // audioDataからBlobを復元
+      const soundsWithBlob = savedSounds.map(sound => {
+        if (sound.audioData) {
+          try {
+            const blob = base64ToBlob(sound.audioData, 'audio/wav');
+            return { ...sound, audioBlob: blob };
+          } catch (error) {
+            console.error('音声データの復元に失敗:', error);
+            return sound;
+          }
+        }
+        return sound;
+      });
+      
+      setSounds(soundsWithBlob);
+      setFilteredSounds(soundsWithBlob);
+      
+      // 全てのタグを取得
+      const tags = [...new Set(soundsWithBlob.flatMap(sound => sound.tags || []))];
+      setAllTags(tags);
+    } catch (error) {
+      console.error('音素材の読み込みに失敗:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   // Base64 を Blob に変換する関数
   const base64ToBlob = (base64, mimeType) => {
@@ -50,13 +64,13 @@ const SoundLibrary = () => {
     let filtered = sounds;
     
     if (selectedTag) {
-      filtered = filtered.filter(sound => sound.tags.includes(selectedTag));
+      filtered = filtered.filter(sound => (sound.tags || []).includes(selectedTag));
     }
     
     if (searchQuery) {
       filtered = filtered.filter(sound => 
         sound.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        sound.tags.some(tag => tag.toLowerCase().includes(searchQuery.toLowerCase()))
+        (sound.tags || []).some(tag => tag.toLowerCase().includes(searchQuery.toLowerCase()))
       );
     }
     
@@ -68,15 +82,44 @@ const SoundLibrary = () => {
     setSearchQuery('');
   };
 
-  const deleteSound = (soundId) => {
-    const updatedSounds = sounds.filter(sound => sound.id !== soundId);
-    setSounds(updatedSounds);
-    localStorage.setItem('soundRecordings', JSON.stringify(updatedSounds));
-    
-    // タグリストも更新
-    const tags = [...new Set(updatedSounds.flatMap(sound => sound.tags))];
-    setAllTags(tags);
+  const deleteSound = async (soundId) => {
+    try {
+      await deleteRecording(soundId);
+      await loadSounds(); // 再読み込み
+    } catch (error) {
+      console.error('削除エラー:', error);
+      alert('音素材の削除に失敗しました。');
+    }
   };
+
+  const handleAddTag = async (soundId, tag) => {
+    try {
+      await addTagToRecording(soundId, tag);
+      await loadSounds(); // 再読み込み
+    } catch (error) {
+      console.error('タグ追加エラー:', error);
+      alert('タグの追加に失敗しました。');
+    }
+  };
+
+  const handleRemoveTag = async (soundId, tag) => {
+    try {
+      await removeTagFromRecording(soundId, tag);
+      await loadSounds(); // 再読み込み
+    } catch (error) {
+      console.error('タグ削除エラー:', error);
+      alert('タグの削除に失敗しました。');
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="sound-library">
+        <h2>📚 音ライブラリ</h2>
+        <div className="loading">読み込み中...</div>
+      </div>
+    );
+  }
 
   return (
     <div className="sound-library">
@@ -161,6 +204,8 @@ const SoundLibrary = () => {
               key={sound.id} 
               sound={sound} 
               onDelete={deleteSound}
+              onAddTag={handleAddTag}
+              onRemoveTag={handleRemoveTag}
             />
           ))
         )}
@@ -169,12 +214,31 @@ const SoundLibrary = () => {
   );
 };
 
-const LibrarySoundCard = ({ sound, onDelete }) => {
+const LibrarySoundCard = ({ sound, onDelete, onAddTag, onRemoveTag }) => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showTagEditor, setShowTagEditor] = useState(false);
+  const [newTag, setNewTag] = useState('');
 
   const handleDelete = () => {
     onDelete(sound.id);
     setShowDeleteConfirm(false);
+  };
+
+  const handleAddTag = () => {
+    if (newTag.trim()) {
+      onAddTag(sound.id, newTag.trim());
+      setNewTag('');
+    }
+  };
+
+  const handleRemoveTag = (tag) => {
+    onRemoveTag(sound.id, tag);
+  };
+
+  const handleKeyPress = (e) => {
+    if (e.key === 'Enter') {
+      handleAddTag();
+    }
   };
 
   const dragStart = (e) => {
@@ -202,6 +266,13 @@ const LibrarySoundCard = ({ sound, onDelete }) => {
         <h4>{sound.name}</h4>
         <div className="sound-actions">
           <button 
+            className="tag-edit-btn"
+            onClick={() => setShowTagEditor(!showTagEditor)}
+            title="タグを編集"
+          >
+            🏷️
+          </button>
+          <button 
             className="delete-btn"
             onClick={() => setShowDeleteConfirm(true)}
             title="削除"
@@ -215,14 +286,41 @@ const LibrarySoundCard = ({ sound, onDelete }) => {
         <p className="sound-date">
           📅 {new Date(sound.createdAt).toLocaleDateString('ja-JP')}
         </p>
-        {sound.tags.length > 0 && (
+        {(sound.tags || []).length > 0 && (
           <div className="sound-tags">
             {sound.tags.map(tag => (
-              <span key={tag} className="tag small">{tag}</span>
+              <span key={tag} className="tag small">
+                {tag}
+                {showTagEditor && (
+                  <button 
+                    className="tag-remove-btn"
+                    onClick={() => handleRemoveTag(tag)}
+                    title="タグを削除"
+                  >
+                    ×
+                  </button>
+                )}
+              </span>
             ))}
           </div>
         )}
       </div>
+
+      {showTagEditor && (
+        <div className="tag-editor">
+          <input
+            type="text"
+            value={newTag}
+            onChange={(e) => setNewTag(e.target.value)}
+            onKeyPress={handleKeyPress}
+            placeholder="新しいタグを入力..."
+            className="tag-input"
+          />
+          <button onClick={handleAddTag} className="add-tag-btn">
+            ➕ 追加
+          </button>
+        </div>
+      )}
 
       <audio 
         controls 

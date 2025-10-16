@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import './DAWPage.css';
-import { getSongData, deleteSongData } from '../utils/indexedDB';
+import { getSongData, deleteSongData, saveRecording, getAllRecordings } from '../utils/indexedDB';
 
 // DAWの定数（時間ベースのタイムライン）
 const TIME_MODE_TOTAL_SECONDS = 90; // 表示する総秒数
@@ -12,98 +12,12 @@ const DAWPage = () => {
   // トラック名の番号管理用カウンター
   const trackNameCounterRef = useRef(1);
   
-  // LocalStorageからの自動復元機能
-  const loadAutoSavedProject = () => {
-    try {
-      const autoSavedData = localStorage.getItem('dawProjectAutoSave');
-      if (autoSavedData) {
-        const projectData = JSON.parse(autoSavedData);
-        
-        // トラックカウンターの復元
-        if (projectData.trackNameCounter) {
-          trackNameCounterRef.current = projectData.trackNameCounter;
-        }
-        if (projectData.trackIdCounter) {
-          trackIdCounterRef.current = projectData.trackIdCounter;
-        }
-        
-        // 音素材データを復元（LocalStorageから）
-        const savedSounds = JSON.parse(localStorage.getItem('soundRecordings') || '[]');
-        const soundsMap = new Map();
-        
-        // 音素材をMapに格納（名前をキーにして高速検索）
-        savedSounds.forEach(sound => {
-          if (sound.name && sound.audioData) {
-            soundsMap.set(sound.name, sound);
-          }
-        });
-        
-        // audioBlobを復元する関数
-        const restoreAudioBlob = (soundData) => {
-          if (!soundData || !soundData.name) return soundData;
-          
-          // LocalStorageの音素材から対応するデータを取得
-          const savedSound = soundsMap.get(soundData.name);
-          if (savedSound && savedSound.audioData) {
-            try {
-              const byteCharacters = atob(savedSound.audioData.split(',')[1]);
-              const byteNumbers = new Array(byteCharacters.length);
-              for (let i = 0; i < byteCharacters.length; i++) {
-                byteNumbers[i] = byteCharacters.charCodeAt(i);
-              }
-              const byteArray = new Uint8Array(byteNumbers);
-              const blob = new Blob([byteArray], { type: 'audio/wav' });
-              return { ...soundData, audioBlob: blob, audioData: savedSound.audioData };
-            } catch (error) {
-              console.error('audioBlob復元エラー:', soundData.name, error);
-            }
-          }
-          return soundData;
-        };
-        
-        // 無効なクリップをフィルタリング & audioBlobを復元
-        const validTracks = (projectData.tracks || []).map(track => ({
-          ...track,
-          clips: (track.clips || [])
-            .map(clip => {
-              if (!clip.soundData || !clip.soundData.name) {
-                console.warn('自動保存データから無効なクリップを除外:', clip);
-                return null;
-              }
-              // soundDataのaudioBlobを復元
-              return {
-                ...clip,
-                soundData: restoreAudioBlob(clip.soundData)
-              };
-            })
-            .filter(clip => clip !== null)
-        }));
-        
-        return {
-          tracks: validTracks.length > 0 ? validTracks : [{ 
-            id: Date.now(), 
-            name: 'トラック 1', 
-            clips: [] 
-          }],
-          pixelsPerSecond: projectData.pixelsPerSecond || DEFAULT_PIXELS_PER_SECOND
-        };
-      }
-    } catch (error) {
-      console.error('自動保存データの復元に失敗:', error);
-    }
-    
-    return {
-      tracks: [{ 
-        id: Date.now(), 
-        name: 'トラック 1', 
-        clips: [] 
-      }],
-      pixelsPerSecond: DEFAULT_PIXELS_PER_SECOND
-    };
-  };
-
-  const initialData = loadAutoSavedProject();
-  const [tracks, setTracks] = useState(initialData.tracks);
+  // 初期値はデフォルト値を使用（非同期読み込みはuseEffectで実行）
+  const [tracks, setTracks] = useState([{ 
+    id: Date.now(), 
+    name: 'トラック 1', 
+    clips: [] 
+  }]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [audioContext, setAudioContext] = useState(null);
@@ -118,12 +32,214 @@ const DAWPage = () => {
   const [instructionsExpanded, setInstructionsExpanded] = useState(false); // 使い方の折りたたみ状態
   const [showSoundPanel, setShowSoundPanel] = useState(true);
   const [draggedClip, setDraggedClip] = useState(null);
+  const [pixelsPerSecond, setPixelsPerSecond] = useState(DEFAULT_PIXELS_PER_SECOND);
+  
+  // インポート楽曲と自動保存データの読み込み（統合版）
+  useEffect(() => {
+    const loadProjectData = async () => {
+      try {
+        // まずインポート楽曲をチェック
+        const songData = await getSongData();
+        
+        if (songData) {
+          console.log('✓ インポート楽曲を検出しました');
+          
+          // プロジェクトデータを復元
+          setPixelsPerSecond(songData.pixelsPerSecond || DEFAULT_PIXELS_PER_SECOND);
+          
+          // audioDataからaudioBlobを復元する関数
+          const restoreAudioBlob = (soundData) => {
+            if (soundData.audioData && !soundData.audioBlob) {
+              try {
+                const byteCharacters = atob(soundData.audioData.split(',')[1]);
+                const byteNumbers = new Array(byteCharacters.length);
+                for (let i = 0; i < byteCharacters.length; i++) {
+                  byteNumbers[i] = byteCharacters.charCodeAt(i);
+                }
+                const byteArray = new Uint8Array(byteNumbers);
+                const blob = new Blob([byteArray], { type: 'audio/wav' });
+                return { ...soundData, audioBlob: blob };
+              } catch (error) {
+                console.error('Blob復元エラー:', error);
+                return soundData;
+              }
+            }
+            return soundData;
+          };
+          
+          // 使用されている音素材を収集
+          const usedSounds = new Map();
+          
+          if (songData.tracks) {
+            // 各トラックのクリップのsoundDataを復元
+            const restoredTracks = songData.tracks.map(track => ({
+              ...track,
+              clips: track.clips.map(clip => {
+                const restoredSoundData = restoreAudioBlob(clip.soundData);
+                
+                // 音素材を収集（重複チェック）
+                if (restoredSoundData && restoredSoundData.name && !usedSounds.has(restoredSoundData.name)) {
+                  usedSounds.set(restoredSoundData.name, restoredSoundData);
+                }
+                
+                return {
+                  ...clip,
+                  soundData: restoredSoundData
+                };
+              })
+            }));
+            setTracks(restoredTracks);
+          }
+          
+          // 使用されている音素材を音ライブラリーに自動追加
+          if (usedSounds.size > 0) {
+            setSounds(prevSounds => {
+              const existingNames = new Set(prevSounds.map(s => s.name));
+              const maxId = prevSounds.length > 0 ? Math.max(...prevSounds.map(s => s.id)) : 0;
+              
+              const newSounds = [];
+              let idCounter = 1;
+              
+              usedSounds.forEach((soundData) => {
+                if (!existingNames.has(soundData.name)) {
+                  newSounds.push({
+                    ...soundData,
+                    id: maxId + idCounter,
+                    source: 'cloud-import',
+                    importedAt: new Date().toISOString()
+                  });
+                  idCounter++;
+                  existingNames.add(soundData.name);
+                }
+              });
+              
+              if (newSounds.length > 0) {
+                // IndexedDBに保存
+                (async () => {
+                  try {
+                    for (const sound of newSounds) {
+                      await saveRecording({
+                        ...sound,
+                        audioBlob: undefined
+                      });
+                    }
+                    console.log(`✓ ${newSounds.length}個の音素材をIndexedDBに保存しました`);
+                  } catch (error) {
+                    console.error('音素材の保存に失敗:', error);
+                  }
+                })();
+              }
+              
+              return [...prevSounds, ...newSounds];
+            });
+          }
+          
+          if (songData.trackNameCounter) {
+            trackNameCounterRef.current = songData.trackNameCounter;
+          }
+          
+          if (songData.trackIdCounter) {
+            trackIdCounterRef.current = songData.trackIdCounter;
+          }
+          
+          // インポート済みデータをIndexedDBから削除
+          await deleteSongData();
+          
+          const soundCount = usedSounds.size;
+          alert(`先生が指定した楽曲を読み込みました!\n使用されている${soundCount}個の音素材を音ライブラリーに追加しました。`);
+          
+          // インポート楽曲を読み込んだので、自動保存データは読み込まない
+          return;
+        }
+        
+        // インポート楽曲がない場合のみ自動保存データを読み込む
+        console.log('インポート楽曲なし、自動保存データをチェック...');
+        const autoSavedData = localStorage.getItem('dawProjectAutoSave');
+        if (autoSavedData) {
+          const projectData = JSON.parse(autoSavedData);
+          
+          // トラックカウンターの復元
+          if (projectData.trackNameCounter) {
+            trackNameCounterRef.current = projectData.trackNameCounter;
+          }
+          if (projectData.trackIdCounter) {
+            trackIdCounterRef.current = projectData.trackIdCounter;
+          }
+          
+          // ピクセル/秒の復元
+          if (projectData.pixelsPerSecond) {
+            setPixelsPerSecond(projectData.pixelsPerSecond);
+          }
+          
+          // 音素材データを復元（IndexedDBから）
+          const savedSounds = await getAllRecordings();
+          const soundsMap = new Map();
+          
+          // 音素材をMapに格納（名前をキーにして高速検索）
+          savedSounds.forEach(sound => {
+            if (sound.name && sound.audioData) {
+              soundsMap.set(sound.name, sound);
+            }
+          });
+          
+          // audioBlobを復元する関数
+          const restoreAudioBlob = (soundData) => {
+            if (!soundData || !soundData.name) return soundData;
+            
+            // IndexedDBの音素材から対応するデータを取得
+            const savedSound = soundsMap.get(soundData.name);
+            if (savedSound && savedSound.audioData) {
+              try {
+                const byteCharacters = atob(savedSound.audioData.split(',')[1]);
+                const byteNumbers = new Array(byteCharacters.length);
+                for (let i = 0; i < byteCharacters.length; i++) {
+                  byteNumbers[i] = byteCharacters.charCodeAt(i);
+                }
+                const byteArray = new Uint8Array(byteNumbers);
+                const blob = new Blob([byteArray], { type: 'audio/wav' });
+                return { ...soundData, audioBlob: blob, audioData: savedSound.audioData };
+              } catch (error) {
+                console.error('audioBlob復元エラー:', soundData.name, error);
+              }
+            }
+            return soundData;
+          };
+          
+          // 無効なクリップをフィルタリング & audioBlobを復元
+          const validTracks = (projectData.tracks || []).map(track => ({
+            ...track,
+            clips: (track.clips || [])
+              .map(clip => {
+                if (!clip.soundData || !clip.soundData.name) {
+                  console.warn('自動保存データから無効なクリップを除外:', clip);
+                  return null;
+                }
+                return {
+                  ...clip,
+                  soundData: restoreAudioBlob(clip.soundData)
+                };
+              })
+              .filter(clip => clip !== null)
+          }));
+          
+          if (validTracks.length > 0) {
+            setTracks(validTracks);
+            console.log('✓ 自動保存データを復元しました');
+          }
+        }
+      } catch (error) {
+        console.error('プロジェクトデータの読み込みに失敗:', error);
+      }
+    };
+    
+    loadProjectData();
+  }, []);
   const [dragPreview, setDragPreview] = useState(null);
   const [draggedSoundDuration, setDraggedSoundDuration] = useState(400); // ドラッグ中の音素材の長さ
   const [dragOffset, setDragOffset] = useState(0); // ドラッグ開始時のクリップ内オフセット
   
   // タイムライン関連の状態
-  const [pixelsPerSecond, setPixelsPerSecond] = useState(DEFAULT_PIXELS_PER_SECOND); // ズーム倍率
+  // pixelsPerSecondは上で宣言済み
   const [isExporting, setIsExporting] = useState(false); // 音源出力中フラグ
   
   // クラウド保存用のstate
@@ -189,87 +305,98 @@ const DAWPage = () => {
     document.addEventListener('touchstart', resumeAudioContext, { once: true });
     document.addEventListener('click', resumeAudioContext, { once: true });
     
-    // LocalStorageから音素材を読み込み
-    const savedSounds = JSON.parse(localStorage.getItem('soundRecordings') || '[]');
-    
-    // audioDataからBlobを復元
-    const soundsWithBlob = savedSounds.map(sound => {
-      if (sound.audioData) {
-        try {
-          // Base64データの検証
-          if (!sound.audioData.includes(',')) {
-            console.error('無効なBase64フォーマット:', sound.name);
-            return sound;
+    // IndexedDBから音素材を読み込み（非同期処理）
+    const loadSounds = async () => {
+      try {
+        const savedSounds = await getAllRecordings();
+        
+        // audioDataからBlobを復元
+        const soundsWithBlob = savedSounds.map(sound => {
+          if (sound.audioData) {
+            try {
+              // Base64データの検証
+              if (!sound.audioData.includes(',')) {
+                console.error('無効なBase64フォーマット:', sound.name);
+                return sound;
+              }
+              
+              const base64Data = sound.audioData.split(',')[1];
+              if (!base64Data || base64Data.length === 0) {
+                console.error('Base64データが空です:', sound.name);
+                return sound;
+              }
+              
+              const byteCharacters = atob(base64Data);
+              const byteNumbers = new Array(byteCharacters.length);
+              for (let i = 0; i < byteCharacters.length; i++) {
+                byteNumbers[i] = byteCharacters.charCodeAt(i);
+              }
+              const byteArray = new Uint8Array(byteNumbers);
+              
+              // Blobサイズの検証
+              if (byteArray.length === 0) {
+                console.error('Blobデータが空です:', sound.name);
+                return sound;
+              }
+              
+              const blob = new Blob([byteArray], { type: 'audio/wav' });
+              
+              // Blobの有効性を確認
+              if (blob.size === 0) {
+                console.error('作成されたBlobのサイズが0です:', sound.name);
+                return sound;
+              }
+              
+              return { ...sound, audioBlob: blob };
+            } catch (error) {
+              console.error('音声データの復元に失敗:', sound.name, error);
+              return sound;
+            }
           }
-          
-          const base64Data = sound.audioData.split(',')[1];
-          if (!base64Data || base64Data.length === 0) {
-            console.error('Base64データが空です:', sound.name);
-            return sound;
-          }
-          
-          const byteCharacters = atob(base64Data);
-          const byteNumbers = new Array(byteCharacters.length);
-          for (let i = 0; i < byteCharacters.length; i++) {
-            byteNumbers[i] = byteCharacters.charCodeAt(i);
-          }
-          const byteArray = new Uint8Array(byteNumbers);
-          
-          // Blobサイズの検証
-          if (byteArray.length === 0) {
-            console.error('Blobデータが空です:', sound.name);
-            return sound;
-          }
-          
-          const blob = new Blob([byteArray], { type: 'audio/wav' });
-          
-          // Blobの有効性を確認
-          if (blob.size === 0) {
-            console.error('作成されたBlobのサイズが0です:', sound.name);
-            return sound;
-          }
-          
-          return { ...sound, audioBlob: blob };
-        } catch (error) {
-          console.error('音声データの復元に失敗:', sound.name, error);
           return sound;
+        });
+        
+        // 有効な音素材のみをフィルタリング
+        const validSounds = soundsWithBlob.filter(sound => {
+          if (!sound.audioBlob) {
+            console.warn('audioBlobが存在しない音素材をスキップ:', sound.name);
+            return false;
+          }
+          if (!(sound.audioBlob instanceof Blob)) {
+            console.warn('無効なBlob形式の音素材をスキップ:', sound.name);
+            return false;
+          }
+          if (sound.audioBlob.size === 0) {
+            console.warn('サイズが0のBlob音素材をスキップ:', sound.name);
+            return false;
+          }
+          return true;
+        });
+        
+        setSounds(validSounds);
+        setFilteredSounds(validSounds);
+        
+        // 全てのタグを取得
+        const tags = [...new Set(validSounds.flatMap(sound => sound.tags || []))];
+        setAllTags(tags);
+        
+        // 無効な音素材があった場合はIndexedDBを更新
+        if (validSounds.length !== soundsWithBlob.length) {
+          console.log(`⚠️ ${soundsWithBlob.length - validSounds.length}個の無効な音素材を削除しました`);
+          // IndexedDBに有効な音素材のみを保存し直す
+          for (const sound of validSounds) {
+            await saveRecording({
+              ...sound,
+              audioBlob: undefined // Blobは保存しない
+            });
+          }
         }
+      } catch (error) {
+        console.error('音素材の読み込みに失敗:', error);
       }
-      return sound;
-    });
+    };
     
-    // 有効な音素材のみをフィルタリング
-    const validSounds = soundsWithBlob.filter(sound => {
-      if (!sound.audioBlob) {
-        console.warn('audioBlobが存在しない音素材をスキップ:', sound.name);
-        return false;
-      }
-      if (!(sound.audioBlob instanceof Blob)) {
-        console.warn('無効なBlob形式の音素材をスキップ:', sound.name);
-        return false;
-      }
-      if (sound.audioBlob.size === 0) {
-        console.warn('サイズが0のBlob音素材をスキップ:', sound.name);
-        return false;
-      }
-      return true;
-    });
-    
-    setSounds(validSounds);
-    setFilteredSounds(validSounds);
-    
-    // 全てのタグを取得
-    const tags = [...new Set(validSounds.flatMap(sound => sound.tags || []))];
-    setAllTags(tags);
-    
-    // 無効な音素材があった場合はLocalStorageを更新
-    if (validSounds.length !== soundsWithBlob.length) {
-      const validSoundsForStorage = validSounds.map(sound => ({
-        ...sound,
-        audioBlob: undefined // Blobは保存しない
-      }));
-      localStorage.setItem('soundRecordings', JSON.stringify(validSoundsForStorage));
-    }
+    loadSounds();
     
     return () => {
       if (ctx && ctx.state !== 'closed') {
@@ -905,124 +1032,6 @@ const DAWPage = () => {
       setError('クラウド保存に失敗しました');
     }
   };
-
-  // 先生用管理ページから楽曲を読み込む機能
-  useEffect(() => {
-    const checkForImportedSong = async () => {
-      try {
-        // IndexedDBから楽曲データを取得
-        const songData = await getSongData();
-        
-        if (songData) {
-          console.log('✓ Song data loaded from IndexedDB');
-          
-          // プロジェクトデータを復元
-          setPixelsPerSecond(songData.pixelsPerSecond || DEFAULT_PIXELS_PER_SECOND);
-          
-          // audioDataからaudioBlobを復元する関数
-          const restoreAudioBlob = (soundData) => {
-            if (soundData.audioData && !soundData.audioBlob) {
-              try {
-                const byteCharacters = atob(soundData.audioData.split(',')[1]);
-                const byteNumbers = new Array(byteCharacters.length);
-                for (let i = 0; i < byteCharacters.length; i++) {
-                  byteNumbers[i] = byteCharacters.charCodeAt(i);
-                }
-                const byteArray = new Uint8Array(byteNumbers);
-                const blob = new Blob([byteArray], { type: 'audio/wav' });
-                return { ...soundData, audioBlob: blob };
-              } catch (error) {
-                console.error('Blob復元エラー:', error);
-                return soundData;
-              }
-            }
-            return soundData;
-          };
-          
-          // 使用されている音素材を収集
-          const usedSounds = new Map(); // name をキーにして重複を避ける
-          
-          if (songData.tracks) {
-            // 各トラックのクリップのsoundDataを復元
-            const restoredTracks = songData.tracks.map(track => ({
-              ...track,
-              clips: track.clips.map(clip => {
-                const restoredSoundData = restoreAudioBlob(clip.soundData);
-                
-                // 音素材を収集（重複チェック）
-                if (restoredSoundData && restoredSoundData.name && !usedSounds.has(restoredSoundData.name)) {
-                  usedSounds.set(restoredSoundData.name, restoredSoundData);
-                }
-                
-                return {
-                  ...clip,
-                  soundData: restoredSoundData
-                };
-              })
-            }));
-            setTracks(restoredTracks);
-          }
-          
-          // 使用されている音素材を音ライブラリーに自動追加
-          if (usedSounds.size > 0) {
-            setSounds(prevSounds => {
-              const existingNames = new Set(prevSounds.map(s => s.name));
-              const maxId = prevSounds.length > 0 ? Math.max(...prevSounds.map(s => s.id)) : 0;
-              
-              const newSounds = [];
-              let idCounter = 1;
-              
-              usedSounds.forEach((soundData) => {
-                // すでに同じ名前の音素材が存在する場合はスキップ
-                if (!existingNames.has(soundData.name)) {
-                  newSounds.push({
-                    ...soundData,
-                    id: maxId + idCounter,
-                    source: 'cloud-import',
-                    importedAt: new Date().toISOString()
-                  });
-                  idCounter++;
-                  existingNames.add(soundData.name);
-                }
-              });
-              
-              if (newSounds.length > 0) {
-                // LocalStorageにも保存
-                const updatedSounds = [...prevSounds, ...newSounds];
-                const soundsForStorage = updatedSounds.map(sound => ({
-                  ...sound,
-                  audioBlob: undefined // Blobは保存しない
-                }));
-                localStorage.setItem('soundRecordings', JSON.stringify(soundsForStorage));
-                
-                console.log(`${newSounds.length}個の音素材を音ライブラリーに追加しました`);
-              }
-              
-              return [...prevSounds, ...newSounds];
-            });
-          }
-          
-          if (songData.trackNameCounter) {
-            trackNameCounterRef.current = songData.trackNameCounter;
-          }
-          
-          if (songData.trackIdCounter) {
-            trackIdCounterRef.current = songData.trackIdCounter;
-          }
-          
-          // インポート済みデータをIndexedDBから削除
-          await deleteSongData();
-          
-          const soundCount = usedSounds.size;
-          alert(`先生が指定した楽曲を読み込みました!\n使用されている${soundCount}個の音素材を音ライブラリーに追加しました。`);
-        }
-      } catch (error) {
-        console.error('インポートされた楽曲の読み込みに失敗:', error);
-      }
-    };
-
-    checkForImportedSong();
-  }, []);
 
   // 音源出力機能
   const exportAudio = async () => {
@@ -1981,42 +1990,46 @@ const DAWPage = () => {
 
   // 音素材の更新監視（他のページで音が追加された場合の対応）
   useEffect(() => {
-    const handleVisibilityChange = () => {
+    const handleVisibilityChange = async () => {
       if (!document.hidden) {
         // ページが表示されたときに音素材を再読み込み
-        const savedSounds = JSON.parse(localStorage.getItem('soundRecordings') || '[]');
-        
-        // 音声データ復元処理（既存のロジックを再利用）
-        const soundsWithBlob = savedSounds.map(sound => {
-          if (sound.audioData) {
-            try {
-              const base64Data = sound.audioData.split(',')[1];
-              if (!base64Data || base64Data.length === 0) {
+        try {
+          const savedSounds = await getAllRecordings();
+          
+          // 音声データ復元処理（既存のロジックを再利用）
+          const soundsWithBlob = savedSounds.map(sound => {
+            if (sound.audioData) {
+              try {
+                const base64Data = sound.audioData.split(',')[1];
+                if (!base64Data || base64Data.length === 0) {
+                  return sound;
+                }
+                
+                const byteCharacters = atob(base64Data);
+                const byteNumbers = new Array(byteCharacters.length);
+                for (let i = 0; i < byteCharacters.length; i++) {
+                  byteNumbers[i] = byteCharacters.charCodeAt(i);
+                }
+                const byteArray = new Uint8Array(byteNumbers);
+                const blob = new Blob([byteArray], { type: 'audio/wav' });
+                
+                return { ...sound, audioBlob: blob };
+              } catch (error) {
+                console.error('音声データの復元に失敗:', sound.name, error);
                 return sound;
               }
-              
-              const byteCharacters = atob(base64Data);
-              const byteNumbers = new Array(byteCharacters.length);
-              for (let i = 0; i < byteCharacters.length; i++) {
-                byteNumbers[i] = byteCharacters.charCodeAt(i);
-              }
-              const byteArray = new Uint8Array(byteNumbers);
-              const blob = new Blob([byteArray], { type: 'audio/wav' });
-              
-              return { ...sound, audioBlob: blob };
-            } catch (error) {
-              console.error('音声データの復元に失敗:', sound.name, error);
-              return sound;
             }
-          }
-          return sound;
-        });
-        
-        const validSounds = soundsWithBlob.filter(sound => 
-          sound.audioBlob && sound.audioBlob instanceof Blob && sound.audioBlob.size > 0
-        );
-        
-        setSounds(validSounds);
+            return sound;
+          });
+          
+          const validSounds = soundsWithBlob.filter(sound => 
+            sound.audioBlob && sound.audioBlob instanceof Blob && sound.audioBlob.size > 0
+          );
+          
+          setSounds(validSounds);
+        } catch (error) {
+          console.error('音素材の再読み込みに失敗:', error);
+        }
       }
     };
 

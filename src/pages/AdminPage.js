@@ -112,26 +112,70 @@ const AdminPage = () => {
   const selectRoom = async (room) => {
     setSelectedRoom(room);
     setIsLoading(true);
+    setError(''); // エラーをクリア
     
     try {
       // 音声ファイル読み込み
       const audioResponse = await fetch(`${API_BASE_URL}/audio.php?room_id=${room.id}`);
-      const audioData = await audioResponse.json();
+      
+      // レスポンスのステータスコードを確認
+      if (!audioResponse.ok) {
+        const errorText = await audioResponse.text();
+        console.error('Audio API Error Response:', errorText);
+        throw new Error(`音声ファイルの読み込みに失敗しました (HTTP ${audioResponse.status})`);
+      }
+      
+      const audioText = await audioResponse.text();
+      console.log('Audio API Raw Response:', audioText.substring(0, 200)); // 最初の200文字を表示
+      
+      let audioData;
+      try {
+        audioData = JSON.parse(audioText);
+      } catch (parseErr) {
+        console.error('Audio API JSON Parse Error:', parseErr);
+        console.error('Response was:', audioText);
+        throw new Error('音声ファイルAPIがJSONを返しませんでした。サーバーエラーの可能性があります。');
+      }
       
       if (audioData.success) {
-        setAudioFiles(audioData.data);
+        setAudioFiles(audioData.data || []);
+      } else {
+        console.warn('Audio API returned error:', audioData.error);
+        setAudioFiles([]);
       }
       
       // 楽曲データ読み込み
       const songsResponse = await fetch(`${API_BASE_URL}/songs.php?room_id=${room.id}`);
-      const songsData = await songsResponse.json();
+      
+      if (!songsResponse.ok) {
+        const errorText = await songsResponse.text();
+        console.error('Songs API Error Response:', errorText);
+        throw new Error(`楽曲データの読み込みに失敗しました (HTTP ${songsResponse.status})`);
+      }
+      
+      const songsText = await songsResponse.text();
+      console.log('Songs API Raw Response:', songsText.substring(0, 200));
+      
+      let songsData;
+      try {
+        songsData = JSON.parse(songsText);
+      } catch (parseErr) {
+        console.error('Songs API JSON Parse Error:', parseErr);
+        console.error('Response was:', songsText);
+        throw new Error('楽曲データAPIがJSONを返しませんでした。サーバーエラーの可能性があります。');
+      }
       
       if (songsData.success) {
-        setSongs(songsData.data);
+        setSongs(songsData.data || []);
+      } else {
+        console.warn('Songs API returned error:', songsData.error);
+        setSongs([]);
       }
     } catch (err) {
-      setError('部屋データの読み込みに失敗しました');
+      setError(err.message || '部屋データの読み込みに失敗しました');
       console.error('Load room data error:', err);
+      setAudioFiles([]);
+      setSongs([]);
     } finally {
       setIsLoading(false);
     }
@@ -190,13 +234,33 @@ const AdminPage = () => {
   // 楽曲再現(DAWページで開く)
   const openSongInDAW = async (song) => {
     try {
+      // song_dataが省略されている場合は、個別に取得
+      let songData = song.song_data;
+      
+      if (song.data_omitted || !songData) {
+        console.log('楽曲データを個別取得します...');
+        const response = await fetch(`${API_BASE_URL}/songs.php?uid=${song.uid}`);
+        
+        if (!response.ok) {
+          throw new Error(`楽曲データの取得に失敗しました (HTTP ${response.status})`);
+        }
+        
+        const result = await response.json();
+        
+        if (!result.success) {
+          throw new Error(result.error || '楽曲データの取得に失敗しました');
+        }
+        
+        songData = result.data.song_data;
+      }
+      
       // 楽曲データのサイズを確認
-      const songDataStr = JSON.stringify(song.song_data);
+      const songDataStr = JSON.stringify(songData);
       const sizeInMB = new Blob([songDataStr]).size / 1024 / 1024;
       console.log(`Song data size: ${sizeInMB.toFixed(2)} MB`);
       
       // IndexedDBに保存
-      await saveSongData(song.song_data);
+      await saveSongData(songData);
       console.log('✓ Song data saved to IndexedDB');
       
       // DAWページを新しいタブで開く
@@ -397,6 +461,12 @@ const AdminPage = () => {
                     <div className="song-details">
                       {song.student_name && <span>作成者: {song.student_name}</span>}
                       {song.group_number && <span>班番号: {song.group_number}</span>}
+                      {song.song_data_size && (
+                        <span>
+                          データサイズ: {(song.song_data_size / 1024).toFixed(0)}KB
+                          {song.data_omitted && ' (大容量)'}
+                        </span>
+                      )}
                       <span>作成日: {new Date(song.created_at).toLocaleDateString('ja-JP')}</span>
                       <span>更新日: {new Date(song.updated_at).toLocaleDateString('ja-JP')}</span>
                     </div>

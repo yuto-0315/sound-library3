@@ -1,4 +1,9 @@
 <?php
+// エラー表示を有効化（デバッグ用）
+error_reporting(E_ALL);
+ini_set('display_errors', 0); // ブラウザには表示しない
+ini_set('log_errors', 1);
+
 require_once 'config.php';
 
 setCORSHeaders();
@@ -21,9 +26,14 @@ try {
         default:
             sendError('許可されていないメソッドです', 405);
     }
+} catch (PDOException $e) {
+    error_log('PDO Error in audio.php: ' . $e->getMessage());
+    error_log('Stack trace: ' . $e->getTraceAsString());
+    sendError('データベースエラーが発生しました: ' . $e->getMessage(), 500);
 } catch (Exception $e) {
-    error_log($e->getMessage());
-    sendError('サーバーエラーが発生しました');
+    error_log('Exception in audio.php: ' . $e->getMessage());
+    error_log('Stack trace: ' . $e->getTraceAsString());
+    sendError('サーバーエラーが発生しました: ' . $e->getMessage(), 500);
 }
 
 // 音声ファイル一覧取得・検索

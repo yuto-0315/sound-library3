@@ -1,4 +1,9 @@
 <?php
+// エラー表示を有効化（デバッグ用）
+error_reporting(E_ALL);
+ini_set('display_errors', 0); // ブラウザには表示しない
+ini_set('log_errors', 1);
+
 require_once 'config.php';
 
 setCORSHeaders();
@@ -24,13 +29,27 @@ try {
         default:
             sendError('許可されていないメソッドです', 405);
     }
+} catch (PDOException $e) {
+    error_log('PDO Error in songs.php: ' . $e->getMessage());
+    error_log('Stack trace: ' . $e->getTraceAsString());
+    sendError('データベースエラーが発生しました: ' . $e->getMessage(), 500);
 } catch (Exception $e) {
-    error_log($e->getMessage());
-    sendError('サーバーエラーが発生しました');
+    error_log('Exception in songs.php: ' . $e->getMessage());
+    error_log('Stack trace: ' . $e->getTraceAsString());
+    sendError('サーバーエラーが発生しました: ' . $e->getMessage(), 500);
 }
 
 // 楽曲一覧取得
 function handleGetSongs($pdo) {
+    // 個別楽曲の詳細取得
+    $uid = $_GET['uid'] ?? null;
+    
+    if ($uid) {
+        // 特定の楽曲の詳細を取得（song_data含む）
+        handleGetSongDetail($pdo, $uid);
+        return;
+    }
+    
     $roomId = $_GET['room_id'] ?? null;
     $groupNumber = $_GET['group_number'] ?? null;
     $studentName = $_GET['student_name'] ?? null;
@@ -64,12 +83,49 @@ function handleGetSongs($pdo) {
     $stmt->execute($params);
     $songs = $stmt->fetchAll();
     
-    // song_dataをデコード
+    // メモリ節約のため、song_dataは文字列のまま返す
+    // フロントエンド側で必要に応じてパースする
+    // ただし、一覧表示用には基本情報のみ返す
     foreach ($songs as &$song) {
-        $song['song_data'] = json_decode($song['song_data'], true);
+        // song_dataのサイズを確認
+        $dataSize = strlen($song['song_data']);
+        
+        // 大きすぎる場合はメタデータのみ返す
+        if ($dataSize > 1024 * 1024) { // 1MB以上
+            $song['song_data_size'] = $dataSize;
+            $song['song_data'] = null; // 大きすぎるので除外
+            $song['data_omitted'] = true;
+        } else {
+            // 小さいデータはデコードして返す
+            $song['song_data'] = json_decode($song['song_data'], true);
+            $song['song_data_size'] = $dataSize;
+            $song['data_omitted'] = false;
+        }
     }
     
     sendSuccess($songs, '楽曲一覧を取得しました');
+}
+
+// 個別楽曲の詳細取得
+function handleGetSongDetail($pdo, $uid) {
+    $sql = "SELECT sd.*, r.room_number, r.room_name 
+            FROM song_data sd 
+            JOIN rooms r ON sd.room_id = r.id 
+            WHERE sd.uid = ?";
+    
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([$uid]);
+    $song = $stmt->fetch();
+    
+    if (!$song) {
+        sendError('楽曲が見つかりませんでした', 404);
+        return;
+    }
+    
+    // song_dataをデコード
+    $song['song_data'] = json_decode($song['song_data'], true);
+    
+    sendSuccess($song, '楽曲詳細を取得しました');
 }
 
 // 楽曲保存

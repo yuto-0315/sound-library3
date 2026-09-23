@@ -221,7 +221,11 @@ describe('読み込み中の操作', () => {
     expect(container.querySelector('.daw-main-area')).toHaveClass('is-loading');
     expect(container.querySelector('.daw-main-area')).toHaveAttribute('aria-busy', 'true');
     expect(container.querySelector('.daw-controls')).toHaveClass('is-loading');
+    // キーボードでも操作できないように inert にする
+    expect(container.querySelector('.daw-controls')).toHaveAttribute('inert');
+    expect(container.querySelector('.daw-main-area')).toHaveAttribute('inert');
     await waitForLoaded();
+    expect(container.querySelector('.daw-controls')).not.toHaveAttribute('inert');
     expect(container.querySelector('.daw-main-area')).not.toHaveClass('is-loading');
     expect(container.querySelector('.daw-main-area')).toHaveAttribute('aria-busy', 'false');
   });

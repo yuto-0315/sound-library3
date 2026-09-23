@@ -62,6 +62,7 @@ const SoundCollection = () => {
   const isStartingRef = useRef(false);
   const isMountedRef = useRef(true);
   const objectUrlsRef = useRef(new Set());
+  const savingUrlRef = useRef(null); // 保存中の音の URL（解放しない）
 
   // アクセシビリティフック
   const { announce, AnnouncementRegion } = useAnnouncement();
@@ -103,10 +104,10 @@ const SoundCollection = () => {
     }
   };
 
-  // 編集中の音を差し替える（保存しなかった前の音の URL は解放する）
+  // 編集中の音を差し替える（保存しなかった前の音の URL は解放する。保存中の音は一覧で使うので残す）
   const replaceCurrentRecording = (next) => {
     setCurrentRecording(prev => {
-      if (prev && prev.url && (!next || prev.url !== next.url)) {
+      if (prev && prev.url && (!next || prev.url !== next.url) && prev.url !== savingUrlRef.current) {
         releaseObjectUrl(prev.url);
       }
       return next;
@@ -203,6 +204,8 @@ const SoundCollection = () => {
         if (streamRef.current === stream) streamRef.current = null;
         if (mediaRecorderRef.current === recorder) mediaRecorderRef.current = null;
         if (!isMountedRef.current) return;
+        // マイクが切断されたなどで自動的に止まった場合も「録音中」の表示を戻す
+        setIsRecording(false);
 
         // 実際の録音形式で Blob を作る（常に audio/wav と表記すると iPad で再生できなくなる）
         const type = recorder.mimeType || (chunks[0] && chunks[0].type) || mimeType || 'audio/mp4';
@@ -276,6 +279,7 @@ const SoundCollection = () => {
     if (!target || !name.trim() || isSaving) return;
 
     setIsSaving(true);
+    savingUrlRef.current = target.url;
     clearError();
     try {
       const record = {
@@ -300,7 +304,8 @@ const SoundCollection = () => {
       requestPersistentStorage();
       if (!isMountedRef.current) return;
       setRecordings(prev => [...prev, { ...record, id, url: target.url }]);
-      setCurrentRecording(null);
+      // 保存中に次の録音が始まって編集中の音が変わっていたら、そちらは残す
+      setCurrentRecording(prev => (prev && prev.url === target.url ? null : prev));
       announce(`「${record.name}」を保存しました。`, 'polite');
     } catch (error) {
       console.error('録音の保存に失敗しました:', error);
@@ -309,6 +314,7 @@ const SoundCollection = () => {
         ? '保存できる容量が足りません。音ライブラリで使わない音を削除してから、もう一度保存してください。'
         : '録音の保存に失敗しました。もう一度「保存」を押してください。');
     } finally {
+      savingUrlRef.current = null;
       if (isMountedRef.current) setIsSaving(false);
     }
   };
@@ -670,6 +676,7 @@ const RecordingEditor = ({ recording, onSave, onCancel, isSaving = false }) => {
           onClick={onCancel} 
           className="accessible-button button-secondary"
           type="button"
+          disabled={isSaving}
           aria-describedby="cancel-help"
         >
           <Icon icon={X} label="キャンセル" /> キャンセル

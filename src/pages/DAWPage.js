@@ -176,6 +176,7 @@ const DAWPage = () => {
   });
 
   const timelineRef = useRef(null);
+  const cloudTitleInputRef = useRef(null);
   const trackHeadersRef = useRef(null);
   const timelineContainerRef = useRef(null);
   const playheadRef = useRef(null);
@@ -335,11 +336,12 @@ const DAWPage = () => {
       return;
     }
 
+    // 先に試聴を止める（stopPreview は再生中でなければ消音モード対策を解除するので、有効にする前に呼ぶ）
+    stopPreview();
+    stopAllSources();
     // ここまで await を挟まないこと。iOS はタップの処理中でないと音を出す許可をくれない。
     enableSilentModePlayback();
     const resumePromise = unlockAudioContext(ctx);
-    stopPreview();
-    stopAllSources();
 
     const session = playbackSessionRef.current + 1;
     playbackSessionRef.current = session;
@@ -428,9 +430,10 @@ const DAWPage = () => {
       if (onEnded) onEnded();
       return;
     }
+    // 前の試聴を止めてから消音モード対策を有効にする（逆にすると止めた時点で解除されてしまう）
+    stopPreview();
     enableSilentModePlayback();
     const resumePromise = unlockAudioContext(ctx);
-    stopPreview();
 
     const preview = { source: null, onEnded };
     previewRef.current = preview;
@@ -750,6 +753,13 @@ const DAWPage = () => {
     };
   }, [flushAutoSave, refreshSounds]);
 
+  // クラウド保存ダイアログを開いたら入力欄にフォーカスする（Esc で閉じられる）
+  useEffect(() => {
+    if (showCloudSaveDialog && cloudTitleInputRef.current) {
+      cloudTitleInputRef.current.focus();
+    }
+  }, [showCloudSaveDialog]);
+
   // ========== スクロール ==========
 
   // トラックヘッダーとタイムラインコンテナのスクロール同期
@@ -997,19 +1007,10 @@ const DAWPage = () => {
     dragOffsetRef.current = toPosition(mouseX - clipRect.left);
   };
 
-  // ドラッグ終了時のクリーンアップ
-  const handleDragEnd = (e) => {
-    const movingClip = draggedClipRef.current;
-    // タイムラインの外にドロップされた場合はクリップを削除する
-    // （Firefox は dragend の座標が 0,0 になるので、その場合は削除しない）
-    if (movingClip && timelineRef.current && e && (e.clientX !== 0 || e.clientY !== 0)) {
-      const timelineRect = timelineRef.current.getBoundingClientRect();
-      const outside = e.clientX < timelineRect.left || e.clientX > timelineRect.right ||
-        e.clientY < timelineRect.top || e.clientY > timelineRect.bottom;
-      if (outside) {
-        removeClip(movingClip.originalTrackId, movingClip.id);
-      }
-    }
+  // ドラッグ終了時のクリーンアップ。
+  // 以前はタイムラインの外で離すとクリップを確認なしで削除していたが、目盛りの上などで
+  // 手を離しただけで消えてしまうため、今は元の位置に戻すだけにしている（削除は × ボタンで行う）。
+  const handleDragEnd = () => {
     cleanupDragState();
   };
 
@@ -1304,7 +1305,7 @@ const DAWPage = () => {
       )}
 
       {/* 読み込み中に置いたクリップは読み込み完了時に上書きされて消えてしまうので、操作できないようにする */}
-      <div className={`daw-controls card ${isInitialLoading ? 'is-loading' : ''}`} aria-busy={isInitialLoading}>
+      <div className={`daw-controls card ${isInitialLoading ? 'is-loading' : ''}`} aria-busy={isInitialLoading} {...(isInitialLoading ? { inert: '' } : {})}>
         {/* 上段：音素材表示切り替え、保存関連機能 */}
         <div className="top-controls-row">
           <div className="left-controls">
@@ -1410,7 +1411,7 @@ const DAWPage = () => {
         </div>
       </div>
 
-      <div className={`daw-main-area ${isInitialLoading ? 'is-loading' : ''}`} aria-busy={isInitialLoading}>
+      <div className={`daw-main-area ${isInitialLoading ? 'is-loading' : ''}`} aria-busy={isInitialLoading} {...(isInitialLoading ? { inert: '' } : {})}>
         <div className={`sound-panel ${!showSoundPanel ? 'panel-hidden' : ''}`}>
           <div className="sound-panel-header">
             <h3><Icon icon={Music} /> 音素材</h3>
@@ -1553,12 +1554,19 @@ const DAWPage = () => {
       </div>
 
       <div className="instructions-collapsible">
-        <div className="instructions-summary" role="button" tabIndex={0} onClick={() => setInstructionsExpanded((prev) => !prev)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setInstructionsExpanded((prev) => !prev); }}>
+        {/* 以前は role="button" の div の中に button があり、キーボードで押すと二重に切り替わって開かなかった */}
+        <button
+          type="button"
+          className="instructions-summary"
+          aria-expanded={instructionsExpanded}
+          aria-controls="instructions-body"
+          onClick={() => setInstructionsExpanded((prev) => !prev)}
+        >
           <span className="instructions-title"><Icon icon={BookOpen} /> 使い方</span>
-          <button type="button" className="instructions-toggle" aria-expanded={instructionsExpanded} aria-controls="instructions-body">
+          <span className="instructions-toggle">
             {instructionsExpanded ? '折りたたむ' : '表示'}
-          </button>
-        </div>
+          </span>
+        </button>
         {instructionsExpanded && (
           <div id="instructions-body">
             <InstructionsSection />
@@ -1581,10 +1589,14 @@ const DAWPage = () => {
             className="modal-content"
             role="dialog"
             aria-modal="true"
+            aria-labelledby="cloud-save-title"
             style={{ position: 'fixed', zIndex: 1001 }}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') setShowCloudSaveDialog(false);
+            }}
           >
             <div className="modal-header">
-              <h3><Icon icon={CloudUpload} /> 楽曲をクラウドに保存</h3>
+              <h3 id="cloud-save-title"><Icon icon={CloudUpload} /> 楽曲をクラウドに保存</h3>
               <button
                 type="button"
                 className="modal-close-btn"
@@ -1602,6 +1614,7 @@ const DAWPage = () => {
               <div className="form-group">
                 <label htmlFor="cloud-song-title">楽曲タイトル *</label>
                 <input
+                  ref={cloudTitleInputRef}
                   id="cloud-song-title"
                   type="text"
                   value={cloudSaveData.songTitle}

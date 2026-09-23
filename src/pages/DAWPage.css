@@ -1384,7 +1384,12 @@ body.dragging .tracks-area {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  width: 100%;
+  min-height: 44px;
   background: #f8f9fa;
+  color: inherit;
+  font: inherit;
+  text-align: left;
   padding: 10px 12px;
   border-radius: 8px;
   border: 1px solid #e9ecef;

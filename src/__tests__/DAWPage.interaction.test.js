@@ -236,6 +236,37 @@ describe('再生（Web Audio）', () => {
     expect(audioContext.close).toHaveBeenCalled();
   });
 
+  test('消音スイッチ対策（audioSession = playback）は再生中ずっと有効で、止めたら元に戻す', async () => {
+    const audioSession = { type: 'auto' };
+    Object.defineProperty(navigator, 'audioSession', { value: audioSession, configurable: true });
+    try {
+      await seedProject([drumClip(1, 0)]);
+      await renderDAW();
+      fireEvent.click(screen.getByRole('button', { name: '再生' }));
+      await waitFor(() => expect(audioContext.started.length).toBe(2));
+      // 以前は再生開始の直後に stopPreview() が対策を解除していて、消音モードの iPad では音が出なかった
+      expect(audioSession.type).toBe('playback');
+      fireEvent.click(screen.getByRole('button', { name: '停止' }));
+      expect(audioSession.type).toBe('auto');
+    } finally {
+      delete navigator.audioSession;
+    }
+  });
+
+  test('試聴でも消音スイッチ対策が有効なまま鳴らす', async () => {
+    const audioSession = { type: 'auto' };
+    Object.defineProperty(navigator, 'audioSession', { value: audioSession, configurable: true });
+    try {
+      await seedLibrary();
+      const { container } = await renderDAW();
+      fireEvent.click(await within(container.querySelector('.sound-panel')).findByRole('button', { name: 'たいこを試聴' }));
+      await waitFor(() => expect(audioContext.started.length).toBe(2));
+      expect(audioSession.type).toBe('playback');
+    } finally {
+      delete navigator.audioSession;
+    }
+  });
+
   test('同じ音素材は 1 回だけデコードする', async () => {
     await seedProject([drumClip(1, 0), drumClip(2, 200), drumClip(3, 400)]);
     await renderDAW();
@@ -321,6 +352,17 @@ describe('ドラッグ&ドロップ（マウス / iPad の長押しドラッグ�
     });
     await waitFor(() => expect(clipElements(container)).toHaveLength(1));
     expect(clipElements(container)[0].style.left).toBe('0px');
+  });
+
+  test('クリップをタイムラインの外で離しても消さない（以前は確認なしで削除していた）', async () => {
+    await seedProject([drumClip(1, 100)]);
+    const { container } = await renderDAW();
+    const clip = clipElements(container)[0];
+    const dataTransfer = createDataTransfer();
+    fireEvent.dragStart(clip, { dataTransfer, clientX: 120 });
+    fireEvent.dragEnd(clip, { dataTransfer, clientX: 5000, clientY: 5000 });
+    expect(clipElements(container)).toHaveLength(1);
+    expect(clipElements(container)[0].style.left).toBe('100px');
   });
 
   test('クリップの × ボタンで削除できる', async () => {
@@ -583,6 +625,16 @@ describe('クラウド保存', () => {
     expect(Object.keys(body.song_data.assets)).toHaveLength(1);
     expect(body.song_data.tracks[0].clips).toHaveLength(2);
     expect(storage['sound-library-room']).toBe('101');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  test('ダイアログには名前があり、開くとタイトル欄にフォーカスし、Esc で閉じられる', async () => {
+    mockFetch();
+    await renderDAW();
+    fireEvent.click(screen.getByRole('button', { name: /クラウド保存/ }));
+    const dialog = screen.getByRole('dialog', { name: /楽曲をクラウドに保存/ });
+    expect(within(dialog).getByLabelText(/楽曲タイトル/)).toHaveFocus();
+    fireEvent.keyDown(within(dialog).getByLabelText(/楽曲タイトル/), { key: 'Escape' });
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 

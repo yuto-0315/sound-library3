@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import SoundCollection from '../pages/SoundCollection';
 import { getAllRecordings } from '../utils/indexedDB';
 import { installFakeIndexedDB } from '../test-utils/fakeIndexedDB';
@@ -138,6 +138,42 @@ describe('録音と保存', () => {
     fireEvent.click(button);
     await waitFor(() => expect(screen.queryByLabelText(/音の名前/)).not.toBeInTheDocument());
     expect(await getAllRecordings()).toHaveLength(1);
+  });
+
+  test('保存中はキャンセルできない（以前は保存されたのに再生できないカードができた）', async () => {
+    render(<SoundCollection />);
+    await record();
+    fireEvent.change(screen.getByLabelText(/音の名前/), { target: { value: '保存中' } });
+    fireEvent.click(screen.getByRole('button', { name: /保存/ }));
+    expect(screen.getByRole('button', { name: /キャンセル/ })).toBeDisabled();
+    await waitFor(() => expect(screen.queryByLabelText(/音の名前/)).not.toBeInTheDocument());
+    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith('blob:rec-1');
+    expect(document.querySelector('.recordings-grid audio').getAttribute('src')).toBe('blob:rec-1');
+  });
+
+  test('保存中に次の録音をしても、保存した音も次の音も使える', async () => {
+    render(<SoundCollection />);
+    await record();
+    fireEvent.change(screen.getByLabelText(/音の名前/), { target: { value: '1つ目' } });
+    fireEvent.click(screen.getByRole('button', { name: /保存/ }));
+    // 保存が終わる前に次の録音
+    fireEvent.click(screen.getByRole('button', { name: /録音開始/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /録音停止/ }));
+    await waitFor(() => expect(screen.getByText('1つ目')).toBeInTheDocument());
+    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith('blob:rec-1');
+    // 次の音の編集画面は残っている
+    await waitFor(() => expect(screen.getByLabelText(/音の名前/)).toHaveValue(''));
+  });
+
+  test('録音が自動的に止まった場合（マイクが切れたなど）も「録音中」の表示を戻す', async () => {
+    render(<SoundCollection />);
+    fireEvent.click(screen.getByRole('button', { name: /録音開始/ }));
+    await screen.findByRole('button', { name: /録音停止/ });
+    act(() => {
+      recorders[0].stop();
+    });
+    expect(await screen.findByRole('button', { name: /録音開始/ })).toBeInTheDocument();
+    expect(screen.queryByText('録音中...')).not.toBeInTheDocument();
   });
 
   test('録音開始の連打で録音が二重に始まらない', async () => {

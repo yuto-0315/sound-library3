@@ -169,12 +169,16 @@ describe('DAWPage Component', () => {
     expect(screen.getByRole('button', { name: '一時停止' })).toBeInTheDocument();
   });
 
-  test('使い方を開いたり閉じたりできる', async () => {
+  test('使い方を開いたり閉じたりできる（ボタンは 1 つだけで、キーボードでも二重に切り替わらない）', async () => {
     await renderDAW();
-    const toggle = screen.getByRole('button', { name: '表示' });
+    const toggle = screen.getByRole('button', { name: /使い方/ });
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(toggle.querySelector('button')).toBeNull(); // ボタンの中にボタンを入れない
     fireEvent.click(toggle);
-    expect(screen.getByRole('button', { name: '折りたたむ' })).toHaveAttribute('aria-expanded', 'true');
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(toggle).toHaveTextContent('折りたたむ');
     expect(screen.getByText(/自動保存機能/)).toBeInTheDocument();
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
   });
 });

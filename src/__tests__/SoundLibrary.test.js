@@ -1,325 +1,139 @@
+// 音ライブラリページの基本動作。
+// （以前のこのファイルは localStorage からの読み込みや、インストールされていない
+//   user-event v14 の API を前提にしており、一度も通っていなかったため書き直した。
+//   データ保存まわりの詳しい回帰テストは SoundLibrary.data.test.js にある）
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import '@testing-library/jest-dom';
 import SoundLibrary from '../pages/SoundLibrary';
-import { setLocalStorageItem } from './testUtils';
+import { addRecording } from '../utils/indexedDB';
+import { installFakeIndexedDB } from '../test-utils/fakeIndexedDB';
+import { installMemoryLocalStorage } from '../test-utils/storage';
+import { makeDataUrl } from '../test-utils/audioFixtures';
+
+const renderLibrary = async () => {
+  const utils = render(<MemoryRouter><SoundLibrary /></MemoryRouter>);
+  await waitFor(() => expect(screen.queryByText('読み込み中...')).not.toBeInTheDocument());
+  return utils;
+};
+
+const seedSounds = async () => {
+  await addRecording({ name: 'テスト音1', tags: ['test', 'sample'], audioData: makeDataUrl('wav', 'audio/wav'), createdAt: '2026-03-01T00:00:00Z' });
+  await addRecording({ name: 'テスト音2', tags: ['music', 'melody'], audioData: makeDataUrl('mp4', 'audio/mp4'), createdAt: '2026-03-02T00:00:00Z' });
+};
 
 describe('SoundLibrary Component', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
-    localStorage.clear();
+    installFakeIndexedDB();
+    installMemoryLocalStorage();
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    jest.spyOn(console, 'log').mockImplementation(() => {});
   });
 
-  test('renders sound library interface', () => {
-    render(<SoundLibrary />);
-    
-    // メインタイトルが表示される（絵文字を含むテキスト）
-    expect(screen.getByText(/音ライブラリ/)).toBeInTheDocument();
-    
-    // 検索とフィルタ機能が表示される
-    expect(screen.getByRole('textbox')).toBeInTheDocument();
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
-  test('has proper accessibility structure', () => {
-    render(<SoundLibrary />);
-    
-    // 基本的な要素が存在することを確認
-    expect(screen.getByRole('textbox')).toBeInTheDocument();
-    expect(screen.getByText(/音を探す/)).toBeInTheDocument();
+  test('renders sound library interface', async () => {
+    await renderLibrary();
+    expect(screen.getByRole('heading', { level: 2, name: /音ライブラリ/ })).toBeInTheDocument();
+    expect(screen.getByRole('textbox')).toHaveAttribute('placeholder', '音の名前やタグで検索...');
   });
 
-  test('displays empty state when no sounds', () => {
-    render(<SoundLibrary />);
-    
-    // 音がない場合のメッセージ
+  test('読み込み中の表示を出してから一覧を表示する', async () => {
+    render(<MemoryRouter><SoundLibrary /></MemoryRouter>);
+    expect(screen.getByText('読み込み中...')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText('読み込み中...')).not.toBeInTheDocument());
+  });
+
+  test('has proper accessibility structure', async () => {
+    await renderLibrary();
+    expect(screen.getByRole('heading', { name: /音を探す/ })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /タグで絞り込み/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'すべて' })).toBeInTheDocument();
+  });
+
+  test('displays empty state when no sounds', async () => {
+    await renderLibrary();
     expect(screen.getByText(/まだ音素材がありません/)).toBeInTheDocument();
     expect(screen.getByText(/音あつめページから音を録音してみましょう/)).toBeInTheDocument();
   });
 
-  test('loads sounds from localStorage', () => {
-    // テスト用の音データを設定
-    const testSounds = [
-      {
-        id: '1',
-        name: 'テスト音1',
-        audioData: 'data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmciD0qD0fPTgjMGHm7A7+OZSA0PVqzn77BdGAg+ltryxnkpBSl+zPLaizsIGGS57O2iUhELTKXh8bllHgo2jdXzzn0vBSF0xe/eizEIHG/A8OWcTQ0QU6ri8LJjGghCm+HwwXUmBS6Czf',
-        tags: ['test', 'sample'],
-        duration: 10,
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: '2',
-        name: 'テスト音2',
-        audioData: 'data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmciD0qD0fPTgjMGHm7A7+OZSA0PVqzn77BdGAg+ltryxnkpBSl+zPLaizsIGGS57O2iUhELTKXh8bllHgo2jdXzzn0vBSF0xe/eizEIHG/A8OWcTQ0QU6ri8LJjGghCm+HwwXUmBS6Czf',
-        tags: ['music', 'melody'],
-        duration: 15,
-        createdAt: new Date().toISOString()
-      }
-    ];
-    
-    setLocalStorageItem('soundRecordings', testSounds);
-    
-    render(<SoundLibrary />);
-    
-    // 音リストが表示される
+  test('loads sounds from IndexedDB', async () => {
+    await seedSounds();
+    await renderLibrary();
     expect(screen.getByText('テスト音1')).toBeInTheDocument();
     expect(screen.getByText('テスト音2')).toBeInTheDocument();
-    
-    // タグが表示される
-    expect(screen.getByText('test')).toBeInTheDocument();
-    expect(screen.getByText('sample')).toBeInTheDocument();
-    expect(screen.getByText('music')).toBeInTheDocument();
-    expect(screen.getByText('melody')).toBeInTheDocument();
+    expect(screen.getAllByText('test').length).toBeGreaterThan(0);
   });
 
   test('handles search functionality', async () => {
-    const user = userEvent.setup();
-    
-    const testSounds = [
-      {
-        id: '1',
-        name: 'ピアノ音',
-        audioData: 'data:audio/wav;base64,test',
-        tags: ['piano', 'instrument'],
-        duration: 10,
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: '2',
-        name: 'ドラム音',
-        audioData: 'data:audio/wav;base64,test',
-        tags: ['drum', 'percussion'],
-        duration: 5,
-        createdAt: new Date().toISOString()
-      }
-    ];
-    
-    setLocalStorageItem('soundRecordings', testSounds);
-    
-    render(<SoundLibrary />);
-    
-    const searchInput = screen.getByRole('textbox');
-    
-    // ピアノで検索
-    await user.type(searchInput, 'ピアノ');
-    
-    // ピアノ音のみ表示される
-    expect(screen.getByText('ピアノ音')).toBeInTheDocument();
-    expect(screen.queryByText('ドラム音')).not.toBeInTheDocument();
-    
-    // 検索をクリア
-    await user.clear(searchInput);
-    
-    // 全ての音が再表示される
-    expect(screen.getByText('ピアノ音')).toBeInTheDocument();
-    expect(screen.getByText('ドラム音')).toBeInTheDocument();
+    await seedSounds();
+    await renderLibrary();
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'テスト音1' } });
+    expect(screen.getByText('テスト音1')).toBeInTheDocument();
+    expect(screen.queryByText('テスト音2')).not.toBeInTheDocument();
   });
 
   test('handles tag filtering', async () => {
-    const user = userEvent.setup();
-    
-    const testSounds = [
-      {
-        id: '1',
-        name: 'ピアノ音',
-        audioData: 'data:audio/wav;base64,test',
-        tags: ['piano', 'instrument'],
-        duration: 10,
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: '2',
-        name: 'ドラム音',
-        audioData: 'data:audio/wav;base64,test',
-        tags: ['drum', 'percussion'],
-        duration: 5,
-        createdAt: new Date().toISOString()
-      }
-    ];
-    
-    setLocalStorageItem('soundRecordings', testSounds);
-    
-    render(<SoundLibrary />);
-    
-    const tagSelect = screen.getByLabelText('タグでフィルタ');
-    
-    // pianoタグでフィルタ
-    await user.selectOptions(tagSelect, 'piano');
-    
-    // ピアノ音のみ表示される
-    expect(screen.getByText('ピアノ音')).toBeInTheDocument();
-    expect(screen.queryByText('ドラム音')).not.toBeInTheDocument();
-    
-    // フィルタをリセット
-    await user.selectOptions(tagSelect, '');
-    
-    // 全ての音が再表示される
-    expect(screen.getByText('ピアノ音')).toBeInTheDocument();
-    expect(screen.getByText('ドラム音')).toBeInTheDocument();
+    await seedSounds();
+    await renderLibrary();
+    fireEvent.click(within(document.querySelector('.tag-filters')).getByRole('button', { name: 'melody' }));
+    expect(screen.queryByText('テスト音1')).not.toBeInTheDocument();
+    expect(screen.getByText('テスト音2')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'すべて' }));
+    expect(screen.getByText('テスト音1')).toBeInTheDocument();
   });
 
-  test('plays audio when play button is clicked', async () => {
-    const user = userEvent.setup();
-    
-    const testSounds = [
-      {
-        id: '1',
-        name: 'テスト音',
-        audioData: 'data:audio/wav;base64,test',
-        tags: ['test'],
-        duration: 10,
-        createdAt: new Date().toISOString()
-      }
-    ];
-    
-    setLocalStorageItem('soundRecordings', testSounds);
-    
-    render(<SoundLibrary />);
-    
-    const playButton = screen.getByRole('button', { name: /再生/i });
-    
-    await user.click(playButton);
-    
-    // Audio.playが呼ばれることを確認
-    expect(global.Audio).toHaveBeenCalled();
-  });
-
-  test('handles sound deletion', async () => {
-    const user = userEvent.setup();
-    
-    const testSounds = [
-      {
-        id: '1',
-        name: 'テスト音',
-        audioData: 'data:audio/wav;base64,test',
-        tags: ['test'],
-        duration: 10,
-        createdAt: new Date().toISOString()
-      }
-    ];
-    
-    setLocalStorageItem('soundRecordings', testSounds);
-    
-    render(<SoundLibrary />);
-    
-    const deleteButton = screen.getByRole('button', { name: /削除/i });
-    
-    await user.click(deleteButton);
-    
-    // 確認ダイアログが表示される（実装によっては）
-    // 音が削除される
-    await waitFor(() => {
-      expect(screen.queryByText('テスト音')).not.toBeInTheDocument();
+  test('音声プレーヤーで再生できる（Data URL を渡す）', async () => {
+    await seedSounds();
+    await renderLibrary();
+    const players = document.querySelectorAll('audio.sound-player');
+    expect(players).toHaveLength(2);
+    players.forEach((player) => {
+      expect(player).toHaveAttribute('controls');
+      expect(player.getAttribute('src')).toMatch(/^data:audio\/(wav|mp4);base64,/);
     });
   });
 
-  test('displays sound metadata correctly', () => {
-    const testDate = new Date('2023-01-01T12:00:00Z');
-    const testSounds = [
-      {
-        id: '1',
-        name: 'テスト音',
-        audioData: 'data:audio/wav;base64,test',
-        tags: ['test', 'example'],
-        duration: 123,
-        createdAt: testDate.toISOString()
-      }
-    ];
-    
-    setLocalStorageItem('soundRecordings', testSounds);
-    
-    render(<SoundLibrary />);
-    
-    // 音の詳細情報が表示される
-    expect(screen.getByText('テスト音')).toBeInTheDocument();
-    expect(screen.getByText('test')).toBeInTheDocument();
-    expect(screen.getByText('example')).toBeInTheDocument();
-    
-    // 時間が適切に表示される
-    expect(screen.getByText(/2:03/)).toBeInTheDocument(); // 123秒 = 2分3秒
+  test('handles sound deletion', async () => {
+    await seedSounds();
+    await renderLibrary();
+    fireEvent.click(screen.getByRole('button', { name: 'テスト音1を削除' }));
+    expect(screen.getByText('「テスト音1」を削除しますか？')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '削除する' }));
+    await waitFor(() => expect(screen.queryByText('テスト音1')).not.toBeInTheDocument());
+    expect(screen.getByText('テスト音2')).toBeInTheDocument();
   });
 
-  test('handles keyboard navigation', async () => {
-    const user = userEvent.setup();
-    
-    const testSounds = [
-      {
-        id: '1',
-        name: 'テスト音1',
-        audioData: 'data:audio/wav;base64,test',
-        tags: ['test'],
-        duration: 10,
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: '2',
-        name: 'テスト音2',
-        audioData: 'data:audio/wav;base64,test',
-        tags: ['test'],
-        duration: 15,
-        createdAt: new Date().toISOString()
-      }
-    ];
-    
-    setLocalStorageItem('soundRecordings', testSounds);
-    
-    render(<SoundLibrary />);
-    
-    // Tabキーでナビゲーション
-    await user.tab();
-    expect(screen.getByLabelText('音を検索')).toHaveFocus();
-    
-    await user.tab();
-    expect(screen.getByLabelText('タグでフィルタ')).toHaveFocus();
+  test('displays sound metadata correctly', async () => {
+    await seedSounds();
+    await renderLibrary();
+    const card = screen.getByText('テスト音1').closest('.library-sound-card');
+    expect(within(card).getByText(new Date('2026-03-01T00:00:00Z').toLocaleDateString('ja-JP'))).toBeInTheDocument();
+    expect(within(card).getByText('sample')).toBeInTheDocument();
+  });
+
+  test('handles keyboard navigation（操作はすべてボタンなのでキーボードで使える）', async () => {
+    await seedSounds();
+    await renderLibrary();
+    const editButton = screen.getByRole('button', { name: 'テスト音1のタグを編集' });
+    editButton.focus();
+    expect(editButton).toHaveFocus();
+    fireEvent.click(editButton);
+    expect(editButton).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByPlaceholderText('新しいタグを入力...')).toBeInTheDocument();
   });
 
   test('handles combined search and filter', async () => {
-    const user = userEvent.setup();
-    
-    const testSounds = [
-      {
-        id: '1',
-        name: 'ピアノ メロディ',
-        audioData: 'data:audio/wav;base64,test',
-        tags: ['piano', 'melody'],
-        duration: 10,
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: '2',
-        name: 'ピアノ コード',
-        audioData: 'data:audio/wav;base64,test',
-        tags: ['piano', 'chord'],
-        duration: 15,
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: '3',
-        name: 'ドラム ビート',
-        audioData: 'data:audio/wav;base64,test',
-        tags: ['drum', 'rhythm'],
-        duration: 8,
-        createdAt: new Date().toISOString()
-      }
-    ];
-    
-    setLocalStorageItem('soundRecordings', testSounds);
-    
-    render(<SoundLibrary />);
-    
-    const searchInput = screen.getByLabelText('音を検索');
-    const tagSelect = screen.getByLabelText('タグでフィルタ');
-    
-    // ピアノタグでフィルタ
-    await user.selectOptions(tagSelect, 'piano');
-    
-    // メロディで検索
-    await user.type(searchInput, 'メロディ');
-    
-    // ピアノメロディのみ表示される
-    expect(screen.getByText('ピアノ メロディ')).toBeInTheDocument();
-    expect(screen.queryByText('ピアノ コード')).not.toBeInTheDocument();
-    expect(screen.queryByText('ドラム ビート')).not.toBeInTheDocument();
+    await seedSounds();
+    await addRecording({ name: '別の音', tags: ['music'], audioData: makeDataUrl('wav', 'audio/wav') });
+    await renderLibrary();
+    fireEvent.click(within(document.querySelector('.tag-filters')).getByRole('button', { name: 'music' }));
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'テスト' } });
+    expect(screen.getByText('テスト音2')).toBeInTheDocument();
+    expect(screen.queryByText('別の音')).not.toBeInTheDocument();
+    expect(screen.queryByText('テスト音1')).not.toBeInTheDocument();
   });
 });

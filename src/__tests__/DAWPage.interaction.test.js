@@ -617,6 +617,25 @@ describe('保存・読み込み・出力', () => {
     });
   });
 
+  test('壊れた音声を含むファイルを何度読み込んでも、見えない音素材がライブラリに増えない', async () => {
+    const project = serializeProject({
+      tracks: [{ id: 1, name: 'トラック 1', clips: [bellClip(1, 0)] }],
+      sounds: [{ name: '壊れた音', tags: [], audioData: 'data:audio/wav;base64,' }, { name: 'すず', tags: [], audioData: bellAudio }],
+      pixelsPerSecond: 100
+    }, { includeSounds: 'all' });
+    const { container } = await renderDAW();
+    const input = container.querySelector('input[type="file"]');
+    for (let i = 0; i < 2; i++) {
+      fireEvent.change(input, { target: { files: [new File([JSON.stringify(project)], 'p.json')] } });
+      // eslint-disable-next-line no-await-in-loop
+      await waitFor(() => expect(clipNames(container)).toEqual(['すず']));
+      // eslint-disable-next-line no-await-in-loop
+      await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    }
+    const names = (await getAllRecordings()).map((sound) => sound.name);
+    expect(names).toEqual(['すず']);
+  });
+
   test('壊れたプロジェクトファイルはエラーを表示し、今の作業内容を残す', async () => {
     await seedProject([drumClip(1, 0)]);
     const { container } = await renderDAW();

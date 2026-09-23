@@ -167,6 +167,7 @@ const DAWPage = () => {
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [loadAttempt, setLoadAttempt] = useState(0); // 「もう一度読み込む」で増やす
   const [hasBackup, setHasBackup] = useState(false); // 「1つ前の作業に戻す」ができるか
+  const [isRestoring, setIsRestoring] = useState(false); // 「1つ前の作業に戻す」の処理中
   const [saveStatus, setSaveStatus] = useState('idle'); // idle | pending | saving | saved | error | disabled
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0); // 停止中のプレイヘッド位置（ピクセル）
@@ -546,8 +547,12 @@ const DAWPage = () => {
     const records = [];
     const blobs = [];
 
-    candidates.forEach((sound) => {
-      if (!sound || !sound.audioData || knownAudio.has(sound.audioData)) return;
+    // 先に Blob に復元できるか確かめ、再生できない（壊れた）音声は保存しない。
+    // 保存してしまうと一覧には出ないため、読み込むたびに見えない音素材が増えていく
+    const withAudio = candidates.filter((sound) => sound && sound.audioData);
+    const playable = hydrateSounds(withAudio, withAudio);
+    playable.forEach((sound) => {
+      if (knownAudio.has(sound.audioData)) return;
       knownAudio.add(sound.audioData);
       const baseName = sound.name || '音素材';
       let name = baseName;
@@ -757,6 +762,7 @@ const DAWPage = () => {
         lastKnownTimestampRef.current = data.timestamp;
         if (legacyHandledRef.current) removeLegacyAutoSave();
         if (isMountedRef.current) setSaveStatus('saved');
+        return true;
       })
       .catch((saveError) => {
         console.error('プロジェクトの自動保存に失敗:', saveError);
@@ -768,6 +774,7 @@ const DAWPage = () => {
             ? '保存できる容量が足りないため、自動保存できませんでした。音ライブラリで使わない音を削除するか、「プロジェクト保存」でファイルに保存してください。'
             : '自動保存に失敗しました。「プロジェクト保存」でファイルに保存しておくと安心です。');
         }
+        return false;
       })
       .finally(() => {
         state.saving = false;
@@ -778,6 +785,18 @@ const DAWPage = () => {
       });
     return state.promise;
   }, []);
+
+  // 保存待ちの変更をすべて保存し終えるまで待つ。すべて保存できたら true。
+  // （置き換え前にバックアップするとき、保存に失敗した古い版をバックアップしないため）
+  const saveAllPendingChanges = async () => {
+    if (!isProjectLoadedRef.current) return true;
+    let ok = await flushAutoSave();
+    while (autoSaveRef.current.saving) {
+      // eslint-disable-next-line no-await-in-loop
+      ok = await autoSaveRef.current.promise;
+    }
+    return ok !== false && !autoSaveRef.current.pending;
+  };
 
   // タイムラインデータの自動保存（変更が落ち着いてから保存）
   useEffect(() => {
@@ -1217,10 +1236,12 @@ const DAWPage = () => {
         }
         // 今の作業内容（読み込めなかった保存データも含む）をバックアップしてから置き換える
         try {
-          if (isProjectLoadedRef.current) await flushAutoSave();
-          await backupAndClearProjectAutoSave(readLegacyAutoSave());
+          if (!(await saveAllPendingChanges())) {
+            setError('今の作業内容を保存できなかったため、読み込みを中止しました。「プロジェクト保存」でファイルに保存してから、もう一度お試しください。');
+            return;
+          }
+          setHasBackup(await backupAndClearProjectAutoSave(readLegacyAutoSave()));
           legacyHandledRef.current = true;
-          setHasBackup(true);
         } catch (backupError) {
           console.error('作業内容のバックアップに失敗:', backupError);
           setError('保存されている作業内容を守るため、読み込みを中止しました。「もう一度読み込む」を押すか、ページを再読み込みしてください。');
@@ -1402,9 +1423,8 @@ const DAWPage = () => {
     haltPlayback(true);
     try {
       // 旧形式（localStorage）にしか作業内容が無い場合は、それをバックアップする
-      await backupAndClearProjectAutoSave(readLegacyAutoSave());
+      setHasBackup(await backupAndClearProjectAutoSave(readLegacyAutoSave()));
       legacyHandledRef.current = true;
-      setHasBackup(true);
     } catch (resetError) {
       console.error('自動保存データのクリアに失敗:', resetError);
       if (!isProjectLoadedRef.current) {
@@ -1435,18 +1455,30 @@ const DAWPage = () => {
       return;
     }
     haltPlayback(false);
+    // 入れ替えている間の編集は保存されずに消えてしまうので、操作できないようにする
+    setIsRestoring(true);
     try {
-      // 今の画面の内容を保存してから入れ替える
-      await flushAutoSave();
+      // 今の画面の内容を保存してから入れ替える（保存できなければ、古い版をバックアップしないよう中止）
+      if (!(await saveAllPendingChanges())) {
+        setError('今の作業内容を保存できなかったため、1つ前の作業に戻すのを中止しました。');
+        return;
+      }
       const restored = await swapProjectAutoSaveWithBackup();
-      if (!restored || !isMountedRef.current) return;
+      if (!isMountedRef.current) return;
+      if (!restored) {
+        setHasBackup(false);
+        setError('戻せる作業内容がありません。');
+        return;
+      }
       lastKnownTimestampRef.current = restored.timestamp || 0;
+      // 戻した内容はもう一度保存しておく（入れ替えの最中に予約されていた保存があっても、最後に書かれるように）
       applyProject(deserializeProject(restored));
-      suppressAutoSaveTracksRef.current = tracksRef.current;
       setError(null);
     } catch (restoreError) {
       console.error('1つ前の作業内容に戻せませんでした:', restoreError);
-      setError('1つ前の作業内容に戻せませんでした。');
+      if (isMountedRef.current) setError('1つ前の作業内容に戻せませんでした。');
+    } finally {
+      if (isMountedRef.current) setIsRestoring(false);
     }
   };
 
@@ -1475,7 +1507,11 @@ const DAWPage = () => {
       )}
 
       {/* 読み込み中に置いたクリップは読み込み完了時に上書きされて消えてしまうので、操作できないようにする */}
-      <div className={`daw-controls card ${isInitialLoading ? 'is-loading' : ''}`} aria-busy={isInitialLoading} {...(isInitialLoading ? { inert: '' } : {})}>
+      <div
+        className={`daw-controls card ${isInitialLoading || isRestoring ? 'is-loading' : ''}`}
+        aria-busy={isInitialLoading || isRestoring}
+        {...(isInitialLoading || isRestoring ? { inert: '' } : {})}
+      >
         {/* 上段：音素材表示切り替え、保存関連機能 */}
         <div className="top-controls-row">
           <div className="left-controls">
@@ -1598,9 +1634,9 @@ const DAWPage = () => {
 
       {/* 読み込み中と、読み込みに失敗して自動保存が止まっている間は、保存されない編集をさせない */}
       <div
-        className={`daw-main-area ${isInitialLoading || saveStatus === 'disabled' ? 'is-loading' : ''}`}
-        aria-busy={isInitialLoading}
-        {...(isInitialLoading || saveStatus === 'disabled' ? { inert: '' } : {})}
+        className={`daw-main-area ${isInitialLoading || isRestoring || saveStatus === 'disabled' ? 'is-loading' : ''}`}
+        aria-busy={isInitialLoading || isRestoring}
+        {...(isInitialLoading || isRestoring || saveStatus === 'disabled' ? { inert: '' } : {})}
       >
         <div className={`sound-panel ${!showSoundPanel ? 'panel-hidden' : ''}`}>
           <div className="sound-panel-header">

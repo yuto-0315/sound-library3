@@ -373,6 +373,47 @@ describe('1つ前の作業に戻す（バックアップの復元）', () => {
     await waitFor(() => expect(getClipNames(container)).toHaveLength(0));
   });
 
+  test('入れ替えている間は操作できず、戻した内容は保存される', async () => {
+    await saveProjectAutoSave(projectWithClips());
+    const { container } = await renderDAW();
+    await waitFor(() => expect(getClipNames(container)).toHaveLength(2));
+    fireEvent.click(screen.getByRole('button', { name: /リセット/ }));
+    await waitFor(() => expect(getClipNames(container)).toHaveLength(0));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 700)));
+
+    idb.openDelayMs = 20; // 入れ替えに時間がかかる
+    fireEvent.click(await screen.findByRole('button', { name: /1つ前の作業に戻す/ }));
+    expect(container.querySelector('.daw-main-area')).toHaveAttribute('inert');
+    expect(container.querySelector('.daw-controls')).toHaveAttribute('inert');
+    idb.openDelayMs = 0;
+    await waitFor(() => expect(getClipNames(container)).toEqual(['たいこ', 'すず']));
+    expect(container.querySelector('.daw-main-area')).not.toHaveAttribute('inert');
+    await waitForAutoSaveCompleted();
+    expect((await getProjectAutoSave()).tracks[0].clips).toHaveLength(2);
+  });
+
+  test('今の作業内容を保存できないときは、入れ替えを中止して古い版をバックアップしない', async () => {
+    await saveProjectAutoSave(projectWithClips());
+    const { container } = await renderDAW();
+    await waitFor(() => expect(getClipNames(container)).toHaveLength(2));
+    fireEvent.click(screen.getByRole('button', { name: /リセット/ }));
+    await waitFor(() => expect(getClipNames(container)).toHaveLength(0));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 700)));
+    fireEvent.click(screen.getByRole('button', { name: /トラック追加/ })); // 保存待ちの変更
+    idb.failNextCommit(Object.assign(new Error('quota'), { name: 'QuotaExceededError' }), (tx) => tx.mode === 'readwrite');
+    fireEvent.click(await screen.findByRole('button', { name: /1つ前の作業に戻す/ }));
+    expect(await screen.findByText(/1つ前の作業に戻すのを中止しました/)).toBeInTheDocument();
+    expect(getClipNames(container)).toHaveLength(0);
+    expect((await getProjectAutoSaveBackup()).tracks[0].clips).toHaveLength(2); // バックアップはそのまま
+  });
+
+  test('バックアップが無いときはボタンを出さない（空の作業内容をリセットしただけのとき）', async () => {
+    await renderDAW();
+    fireEvent.click(screen.getByRole('button', { name: /リセット/ }));
+    await waitFor(() => expect(window.alert).toHaveBeenCalledWith('プロジェクトをリセットしました'));
+    expect(screen.queryByRole('button', { name: /1つ前の作業に戻す/ })).not.toBeInTheDocument();
+  });
+
   test('先生の楽曲を開いた後でも、自分の作業に戻せる', async () => {
     await saveProjectAutoSave(projectWithClips());
     await saveSongData(serializeProject({

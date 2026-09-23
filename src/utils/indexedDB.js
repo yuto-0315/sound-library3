@@ -144,8 +144,11 @@ const runTransaction = (storeNames, mode, executor) => openDB().then((db) => new
     try {
       tx.abort();
     } catch (error) {
-      // abort できない = 既に書き込みの確定に入っている。失敗扱いにすると「保存できていないのに
-      // 保存済み」の逆（保存できたのに失敗扱い）になるので、complete / abort の結果を待つ
+      // abort できない = 既に書き込みの確定に入っている。すぐ失敗扱いにすると「保存できたのに失敗扱い」に
+      // なるので、complete / abort の結果をもう少し待つ。それでも終わらなければ失敗として扱う
+      timeoutId = setTimeout(() => {
+        finish(reject, new Error('データベースの処理が時間内に終わりませんでした'));
+      }, TRANSACTION_TIMEOUT_MS);
       return;
     }
     finish(reject, new Error('データベースの処理が時間内に終わりませんでした'));
@@ -236,18 +239,28 @@ const hasClips = (project) => !!project && Array.isArray(project.tracks) &&
 
 // 自動保存を消す前に、1 つ前の作業内容としてバックアップに移す（1 つのトランザクションで行う）。
 // IndexedDB に自動保存が無い場合は fallbackData（旧形式の localStorage の作業内容など）をバックアップする。
-export const backupAndClearProjectAutoSave = (fallbackData = null) => runTransaction([STORE_NAME_SONGS], 'readwrite', (tx) => {
+// 処理のあとでバックアップがあるかどうかを返す（「1つ前の作業に戻す」ボタンを出すか決めるため）。
+export const backupAndClearProjectAutoSave = (fallbackData = null) => runTransaction([STORE_NAME_SONGS], 'readwrite', (tx, setResult) => {
   const store = tx.objectStore(STORE_NAME_SONGS);
   const request = store.get(AUTOSAVE_KEY);
   request.onsuccess = () => {
+    let backedUp = false;
     if (request.result) {
       if (hasClips(request.result.data)) {
         store.put({ ...request.result, id: AUTOSAVE_BACKUP_KEY, backedUpAt: Date.now() });
+        backedUp = true;
       }
       store.delete(AUTOSAVE_KEY);
     } else if (hasClips(fallbackData)) {
       store.put({ id: AUTOSAVE_BACKUP_KEY, data: fallbackData, timestamp: Date.now(), backedUpAt: Date.now() });
+      backedUp = true;
     }
+    if (backedUp) {
+      setResult(true);
+      return;
+    }
+    const backupRequest = store.get(AUTOSAVE_BACKUP_KEY);
+    backupRequest.onsuccess = () => setResult(!!backupRequest.result);
   };
 });
 

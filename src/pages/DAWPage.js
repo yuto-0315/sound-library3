@@ -753,11 +753,15 @@ const DAWPage = () => {
     };
   }, [flushAutoSave, refreshSounds]);
 
-  // クラウド保存ダイアログを開いたら入力欄にフォーカスする（Esc で閉じられる）
+  // クラウド保存ダイアログを開いたら入力欄にフォーカスし、Esc で閉じられるようにする
   useEffect(() => {
-    if (showCloudSaveDialog && cloudTitleInputRef.current) {
-      cloudTitleInputRef.current.focus();
-    }
+    if (!showCloudSaveDialog) return undefined;
+    if (cloudTitleInputRef.current) cloudTitleInputRef.current.focus();
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') setShowCloudSaveDialog(false);
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
   }, [showCloudSaveDialog]);
 
   // ========== スクロール ==========
@@ -1591,9 +1595,6 @@ const DAWPage = () => {
             aria-modal="true"
             aria-labelledby="cloud-save-title"
             style={{ position: 'fixed', zIndex: 1001 }}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') setShowCloudSaveDialog(false);
-            }}
           >
             <div className="modal-header">
               <h3 id="cloud-save-title"><Icon icon={CloudUpload} /> 楽曲をクラウドに保存</h3>

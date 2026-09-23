@@ -159,7 +159,7 @@ describe('録音と保存', () => {
     // 保存が終わる前に次の録音
     fireEvent.click(screen.getByRole('button', { name: /録音開始/ }));
     fireEvent.click(await screen.findByRole('button', { name: /録音停止/ }));
-    await waitFor(() => expect(screen.getByText('1つ目')).toBeInTheDocument());
+    expect(await screen.findByText('1つ目')).toBeInTheDocument();
     expect(URL.revokeObjectURL).not.toHaveBeenCalledWith('blob:rec-1');
     // 次の音の編集画面は残っている
     await waitFor(() => expect(screen.getByLabelText(/音の名前/)).toHaveValue(''));

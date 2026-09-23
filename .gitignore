@@ -33,6 +33,7 @@ Thumbs.db
 # Uploaded files (don't commit user uploads)
 api/uploads/audio/*
 !api/uploads/audio/.gitkeep
+!api/uploads/audio/.htaccess
 
 # Logs
 *.log

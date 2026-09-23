@@ -1,5 +1,6 @@
 <?php
 require_once 'config.php';
+require_once 'audio_utils.php';
 
 try {
     $uid = $_GET['uid'] ?? null;
@@ -22,9 +23,10 @@ try {
         exit;
     }
     
-    $filePath = UPLOAD_DIR . $fileInfo['file_path'];
+    // basename: DB の値にパス区切りが含まれていても uploads の外は読ませない
+    $filePath = UPLOAD_DIR . basename($fileInfo['file_path']);
     
-    if (!file_exists($filePath)) {
+    if (!is_file($filePath)) {
         sendError('ファイルが存在しません', 404);
         exit;
     }
@@ -45,14 +47,11 @@ try {
         $updateStmt->execute([$uid]);
     }
     
-    // ファイルダウンロード
-    header('Content-Type: ' . $fileInfo['mime_type']);
-    header('Content-Disposition: attachment; filename="' . $fileInfo['original_filename'] . '"');
-    header('Content-Length: ' . filesize($filePath));
-    header('Cache-Control: must-revalidate');
-    header('Pragma: public');
+    // 保存時の申告が誤っていた古いファイル（中身は mp4 なのに audio/wav など）も
+    // iPad で再生できるよう、中身から判定した形式で返す
+    $mimeType = detectAudioMimeTypeFromFile($filePath) ?? normalizeAudioMimeType($fileInfo['mime_type']);
     
-    readfile($filePath);
+    sendAudioFile($filePath, $mimeType, $fileInfo['original_filename'] ?: basename($filePath));
     
 } catch (Exception $e) {
     error_log($e->getMessage());

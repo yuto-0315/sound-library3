@@ -5,6 +5,7 @@ ini_set('display_errors', 0); // ブラウザには表示しない
 ini_set('log_errors', 1);
 
 require_once 'config.php';
+require_once 'audio_utils.php';
 
 setCORSHeaders();
 
@@ -93,6 +94,19 @@ function handleUploadAudio($pdo) {
     $studentName = $_POST['student_name'] ?? null;
     $fileName = $_POST['file_name'] ?? $file['name'];
     $tags = json_decode($_POST['tags'] ?? '[]', true);
+    if (!is_array($tags)) {
+        $tags = [];
+    }
+    
+    // アップロード自体の失敗（サイズ超過など）を先に判定する
+    if ($file['error'] !== UPLOAD_ERR_OK) {
+        if ($file['error'] === UPLOAD_ERR_INI_SIZE || $file['error'] === UPLOAD_ERR_FORM_SIZE) {
+            sendError('ファイルサイズが大きすぎます');
+        } else {
+            sendError('ファイルのアップロードに失敗しました（エラーコード: ' . $file['error'] . '）');
+        }
+        return;
+    }
     
     if (!$roomId) {
         sendError('部屋IDは必須です');
@@ -113,27 +127,20 @@ function handleUploadAudio($pdo) {
         return;
     }
     
-    // ファイルタイプチェック
-    $allowedMimeTypes = [
-        'audio/mp3',
-        'audio/mpeg',
-        'audio/wav',
-        'audio/wave',
-        'audio/x-wav',
-        'audio/webm',
-        'audio/ogg',
-        'audio/mp4'
-    ];
-    
-    if (!in_array($file['type'], $allowedMimeTypes)) {
+    // ファイルタイプチェック。
+    // ブラウザの申告（$file['type']）は iPad では誤っていることがあるので、中身から判定した形式を優先する。
+    $mimeType = detectAudioMimeTypeFromFile($file['tmp_name']) ?? normalizeAudioMimeType($file['type']);
+    if (!isAllowedAudioMimeType($mimeType)) {
         sendError('サポートされていないファイル形式です');
         return;
     }
+    $mimeType = normalizeAudioMimeType($mimeType);
     
-    // ユニークIDとファイル名の生成
+    // ユニークIDとファイル名の生成。
+    // 拡張子は判定した形式から決める（送られてきたファイル名の拡張子を使うと、
+    // 「.php」などのファイルがサーバーに置かれてしまう危険がある）
     $uid = uniqid('audio_', true);
-    $fileExtension = pathinfo($file['name'], PATHINFO_EXTENSION);
-    $savedFileName = $uid . '.' . $fileExtension;
+    $savedFileName = $uid . '.' . extensionForAudioMimeType($mimeType);
     $filePath = UPLOAD_DIR . $savedFileName;
     
     // ファイル移動
@@ -155,7 +162,7 @@ function handleUploadAudio($pdo) {
         $file['name'],
         $savedFileName,
         $file['size'],
-        $file['type'],
+        $mimeType,
         json_encode($tags, JSON_UNESCAPED_UNICODE)
     ]);
     

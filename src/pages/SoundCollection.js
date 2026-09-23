@@ -70,6 +70,7 @@ const SoundCollection = () => {
   const savedUrlsRef = useRef(new Set()); // 「最近録音した音」で使っている URL（解放しない）
   const currentRecordingRef = useRef(currentRecording);
   currentRecordingRef.current = currentRecording;
+  const editorFieldsRef = useRef(null); // 編集中の名前・タグ（ページを離れるときに覚えておくため）
 
   // アクセシビリティフック
   const { announce, AnnouncementRegion } = useAnnouncement();
@@ -82,12 +83,10 @@ const SoundCollection = () => {
     const objectUrls = objectUrlsRef.current;
     const savedUrls = savedUrlsRef.current;
 
-    // 前にこのページを離れたときの、保存していない音を戻す
+    // 前にこのページを離れたときの、保存していない音を戻す（URL は下の effect で描画後に作る）
     const draft = takeUnsavedDraft();
     if (draft) {
-      const url = URL.createObjectURL(draft.audioBlob);
-      objectUrls.add(url);
-      setCurrentRecording({ ...draft, url });
+      setCurrentRecording({ ...draft, url: null });
       setIsDraftRestored(true);
     }
 
@@ -95,10 +94,11 @@ const SoundCollection = () => {
       isMountedRef.current = false;
       const unsaved = currentRecordingRef.current;
       if (unsaved && unsaved.audioBlob && unsaved.url !== savingUrlRef.current && !savedUrls.has(unsaved.url)) {
+        const fields = editorFieldsRef.current || {};
         keepUnsavedDraft({
           audioBlob: unsaved.audioBlob,
-          name: unsaved.name || '',
-          tags: unsaved.tags || [],
+          name: fields.name !== undefined ? fields.name : unsaved.name || '',
+          tags: fields.tags || unsaved.tags || [],
           createdAt: unsaved.createdAt
         });
       }
@@ -117,6 +117,16 @@ const SoundCollection = () => {
       objectUrls.clear();
     };
   }, []);
+
+  // 復元した音の再生用 URL を作る。
+  // マウント時の effect の中で作ると、開発時の StrictMode の二重実行で後片付けに解放されてしまう。
+  useEffect(() => {
+    if (currentRecording && !currentRecording.url && currentRecording.audioBlob) {
+      const url = URL.createObjectURL(currentRecording.audioBlob);
+      objectUrlsRef.current.add(url);
+      setCurrentRecording((prev) => (prev === currentRecording ? { ...prev, url } : prev));
+    }
+  }, [currentRecording]);
 
   const createObjectUrl = (blob) => {
     const url = URL.createObjectURL(blob);
@@ -322,7 +332,7 @@ const SoundCollection = () => {
 
   const saveRecording = async (name, tags) => {
     const target = currentRecording;
-    if (!target || !name.trim() || isSaving) return;
+    if (!target || !target.url || !name.trim() || isSaving) return;
 
     setIsSaving(true);
     savingUrlRef.current = target.url;
@@ -357,7 +367,11 @@ const SoundCollection = () => {
       announce(`「${record.name}」を保存しました。`, 'polite');
     } catch (error) {
       console.error('録音の保存に失敗しました:', error);
-      if (!isMountedRef.current) return;
+      if (!isMountedRef.current) {
+        // 保存中にほかのページへ移動して保存に失敗した: 戻ってきたときにもう一度保存できるようにする
+        keepUnsavedDraft({ audioBlob: target.audioBlob, name: name.trim(), tags, createdAt: target.createdAt });
+        return;
+      }
       reportError(isQuotaExceededError(error)
         ? '保存できる容量が足りません。音ライブラリで使わない音を削除してから、もう一度保存してください。'
         : '録音の保存に失敗しました。もう一度「保存」を押してください。');
@@ -443,6 +457,7 @@ const SoundCollection = () => {
                 onClick={startRecording}
                 aria-describedby="record-instructions"
                 type="button"
+                disabled={isSaving}
               >
                 <Icon icon={Circle} label="録音開始" fill="currentColor" /> 録音開始
               </button>
@@ -488,6 +503,7 @@ const SoundCollection = () => {
             onClick={() => fileInputRef.current?.click()}
             aria-describedby="upload-instructions"
             type="button"
+            disabled={isSaving}
           >
             <Icon icon={FileAudio} label="ファイル選択" /> ファイルを選択
           </button>
@@ -509,6 +525,7 @@ const SoundCollection = () => {
         <RecordingEditor 
           key={currentRecording.url}
           isDraftRestored={isDraftRestored}
+          onFieldsChange={(fields) => { editorFieldsRef.current = fields; }}
           recording={currentRecording}
           onSave={saveRecording}
           onCancel={() => replaceCurrentRecording(null)}
@@ -542,11 +559,16 @@ const SoundCollection = () => {
   );
 };
 
-const RecordingEditor = ({ recording, onSave, onCancel, isSaving = false, isDraftRestored = false }) => {
+const RecordingEditor = ({ recording, onSave, onCancel, onFieldsChange, isSaving = false, isDraftRestored = false }) => {
   const [name, setName] = useState(recording.name);
   const [tagInput, setTagInput] = useState('');
   const [tags, setTags] = useState(recording.tags);
   const [validationMessage, setValidationMessage] = useState('');
+
+  // 入力途中の名前・タグを親に伝える（ページを離れても戻ったときに続きから書けるように）
+  useEffect(() => {
+    if (onFieldsChange) onFieldsChange({ name, tags });
+  }, [name, tags, onFieldsChange]);
 
   const addTag = () => {
     if (tagInput.trim() && !tags.includes(tagInput.trim())) {

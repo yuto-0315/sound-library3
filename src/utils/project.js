@@ -157,14 +157,16 @@ export const deserializeProject = (data, { findSoundByName } = {}) => {
       return { ...track, id: trackId, name: track.name || 'トラック', clips };
     });
 
+  // ライブラリ用の音素材は Blob にしない（使う側で必要な分だけ復元する）。
+  // 古い形式の楽曲は生徒のライブラリ全体を含むことがあり、全部復元すると古い iPad でメモリが足りなくなる
   const sounds = (Array.isArray(data.sounds) ? data.sounds : [])
     .filter((sound) => sound && sound.name)
     .map((sound) => {
       const metadata = soundMetadata(sound);
       delete metadata.audioRef;
-      return hydrate(metadata, resolveAudioData(sound, metadata));
+      return { ...metadata, audioData: resolveAudioData(sound, metadata) };
     })
-    .filter((sound) => sound.audioBlob);
+    .filter((sound) => sound.audioData);
 
   return {
     pixelsPerSecond: isFiniteNumber(data.pixelsPerSecond) && data.pixelsPerSecond > 0

@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMe
 import {
   BookOpen,
   CircleCheck,
+  History,
   CloudUpload,
   FolderOpen,
   GripVertical,
@@ -34,10 +35,12 @@ import {
   deleteSongData,
   getAllRecordings,
   getProjectAutoSave,
+  getProjectAutoSaveBackup,
   getSongData,
   isQuotaExceededError,
   promoteImportedSongToAutoSave,
-  saveProjectAutoSave
+  saveProjectAutoSave,
+  swapProjectAutoSaveWithBackup
 } from '../utils/indexedDB';
 import {
   blobToArrayBuffer,
@@ -49,6 +52,7 @@ import {
   downloadBlob,
   enableSilentModePlayback,
   encodeWav,
+  isDownloadSupported,
   unlockAudioContext
 } from '../utils/audio';
 import {
@@ -162,6 +166,7 @@ const DAWPage = () => {
   const [isProjectLoaded, setIsProjectLoaded] = useState(false);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [loadAttempt, setLoadAttempt] = useState(0); // 「もう一度読み込む」で増やす
+  const [hasBackup, setHasBackup] = useState(false); // 「1つ前の作業に戻す」ができるか
   const [saveStatus, setSaveStatus] = useState('idle'); // idle | pending | saving | saved | error | disabled
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0); // 停止中のプレイヘッド位置（ピクセル）
@@ -213,8 +218,10 @@ const DAWPage = () => {
   const autoSaveRef = useRef({ saving: false, dirty: false, pending: false });
   // 最後に読み込んだ・保存した作業内容の時刻（別のタブで保存された新しい内容に気付くため）
   const lastKnownTimestampRef = useRef(0);
-  // 保存済みの内容を画面に反映しただけのときは、もう一度保存しない
-  const suppressAutoSaveRef = useRef(false);
+  // 保存済みの内容を画面に反映しただけのときは、もう一度保存しない（反映した tracks を覚えておく）
+  const suppressAutoSaveTracksRef = useRef(null);
+  // 旧形式（localStorage）の作業内容を移行し終えた・バックアップしたか。済むまで localStorage は消さない
+  const legacyHandledRef = useRef(false);
 
   // イベントハンドラや非同期処理から最新の値を読むための ref
   const tracksRef = useRef(tracks);
@@ -638,7 +645,9 @@ const DAWPage = () => {
         const songData = await getSongData();
         if (cancelled) return;
         if (songData) {
-          const current = await getProjectAutoSave();
+          // 旧形式（localStorage）にだけ作業内容がある場合も「今の作業内容」として扱う
+          const legacyForBackup = readLegacyAutoSave();
+          const current = (await getProjectAutoSave()) || legacyForBackup;
           if (cancelled) return;
           const hasWork = !!current && Array.isArray(current.tracks) &&
             current.tracks.some((track) => Array.isArray(track.clips) && track.clips.length > 0);
@@ -648,7 +657,8 @@ const DAWPage = () => {
           );
           if (accepted) {
             // バックアップ・自動保存への書き込み・渡された楽曲の削除を 1 つのトランザクションで行う
-            imported = await promoteImportedSongToAutoSave();
+            imported = await promoteImportedSongToAutoSave(legacyForBackup);
+            if (imported) legacyHandledRef.current = true; // 旧形式の作業内容もバックアップ済み
           } else {
             await deleteSongData();
           }
@@ -670,6 +680,7 @@ const DAWPage = () => {
           }
         }
         if (project) applyProject(project);
+        legacyHandledRef.current = true; // 旧形式の作業内容は読み込んだ（または新しい保存がある）
 
         if (imported && project) {
           let addedCount = 0;
@@ -683,6 +694,12 @@ const DAWPage = () => {
           alert(`先生が指定した楽曲を読み込みました!\n使用されている${addedCount}個の音素材を音ライブラリーに追加しました。`);
         }
         loadSucceeded = true;
+
+        try {
+          setHasBackup(!!(await getProjectAutoSaveBackup()));
+        } catch (backupError) {
+          // バックアップの有無が分からなくても作業は続けられる
+        }
       } catch (loadError) {
         console.error('プロジェクトデータの読み込みに失敗:', loadError);
       }
@@ -706,6 +723,11 @@ const DAWPage = () => {
   }, [addMissingSoundsToLibrary, applyProject, loadAttempt]);
 
   const retryInitialLoad = () => {
+    // 自動保存が止まっている間の変更は保存されていないので、消えることを確認する
+    const hasUnsavedEdits = tracksRef.current.some((track) => track.clips.length > 0) || tracksRef.current.length > 1;
+    if (hasUnsavedEdits && !window.confirm('読み込み直すと、今の画面で行った変更は消えます。よろしいですか？')) {
+      return;
+    }
     setError(null);
     setSaveStatus('idle');
     setIsInitialLoading(true);
@@ -733,7 +755,7 @@ const DAWPage = () => {
     state.promise = saveProjectAutoSave(data)
       .then(() => {
         lastKnownTimestampRef.current = data.timestamp;
-        removeLegacyAutoSave();
+        if (legacyHandledRef.current) removeLegacyAutoSave();
         if (isMountedRef.current) setSaveStatus('saved');
       })
       .catch((saveError) => {
@@ -760,9 +782,10 @@ const DAWPage = () => {
   // タイムラインデータの自動保存（変更が落ち着いてから保存）
   useEffect(() => {
     if (!isProjectLoaded) return undefined;
-    if (suppressAutoSaveRef.current) {
-      suppressAutoSaveRef.current = false;
-      return undefined;
+    const suppressedTracks = suppressAutoSaveTracksRef.current;
+    suppressAutoSaveTracksRef.current = null;
+    if (suppressedTracks && suppressedTracks === tracks) {
+      return undefined; // 保存済みの内容を反映しただけ
     }
     autoSaveRef.current.pending = true;
     setSaveStatus((status) => (status === 'saving' ? status : 'pending'));
@@ -800,18 +823,22 @@ const DAWPage = () => {
 
   // 同じ端末の別のタブ（先生ページから「DAWで開く」を何度も押した場合など）で保存された、
   // より新しい作業内容があれば読み込み直す。読み直さないと、古いタブが次の編集で新しい内容を上書きしてしまう。
-  const reloadIfChangedElsewhere = async () => {
+  const canReplaceWithStored = (tracksBefore) => {
     const state = autoSaveRef.current;
-    if (!isProjectLoadedRef.current || state.pending || state.saving || isPlayingRef.current || draggedClipRef.current) {
-      return;
-    }
+    return isProjectLoadedRef.current && !state.pending && !state.saving && !state.dirty &&
+      !isPlayingRef.current && !draggedClipRef.current && tracksRef.current === tracksBefore;
+  };
+  const reloadIfChangedElsewhere = async () => {
+    const tracksBefore = tracksRef.current;
+    if (!canReplaceWithStored(tracksBefore)) return;
     try {
       const stored = await getProjectAutoSave();
-      if (!stored || !isMountedRef.current || autoSaveRef.current.pending) return;
+      // 読み込みを待っている間に、このタブで編集していたら置き換えない
+      if (!stored || !isMountedRef.current || !canReplaceWithStored(tracksBefore)) return;
       if ((stored.timestamp || 0) > lastKnownTimestampRef.current) {
         lastKnownTimestampRef.current = stored.timestamp || 0;
-        suppressAutoSaveRef.current = true;
         applyProject(deserializeProject(stored));
+        suppressAutoSaveTracksRef.current = tracksRef.current;
       }
     } catch (reloadError) {
       console.warn('他のタブで保存された作業内容を確認できませんでした:', reloadError);
@@ -1143,6 +1170,10 @@ const DAWPage = () => {
 
   // プロジェクト保存機能（音素材ライブラリも含めたバックアップファイル）
   const saveProject = () => {
+    if (!isDownloadSupported()) {
+      setError('この端末のブラウザはファイルの保存に対応していません（iPad は iPadOS 13 以降が必要です）。');
+      return;
+    }
     try {
       const projectData = serializeProject({
         tracks,
@@ -1180,9 +1211,25 @@ const DAWPage = () => {
         }
 
         const project = deserializeProject(projectData);
+        const hasWork = tracksRef.current.some((track) => track.clips.length > 0);
+        if (hasWork && !window.confirm('プロジェクトファイルを読み込むと、今の作業内容は置き換わります（1つ前の作業内容としてバックアップされます）。よろしいですか？')) {
+          return;
+        }
+        // 今の作業内容（読み込めなかった保存データも含む）をバックアップしてから置き換える
+        try {
+          if (isProjectLoadedRef.current) await flushAutoSave();
+          await backupAndClearProjectAutoSave(readLegacyAutoSave());
+          legacyHandledRef.current = true;
+          setHasBackup(true);
+        } catch (backupError) {
+          console.error('作業内容のバックアップに失敗:', backupError);
+          setError('保存されている作業内容を守るため、読み込みを中止しました。「もう一度読み込む」を押すか、ページを再読み込みしてください。');
+          return;
+        }
         haltPlayback(true);
         applyProject(project);
         setIsProjectLoaded(true);
+        setSaveStatus((status) => (status === 'disabled' ? 'idle' : status));
         setError(null);
 
         // 音素材をライブラリに保存（保存しないと再読み込みで消えてしまう）
@@ -1288,6 +1335,11 @@ const DAWPage = () => {
 
   // 音源出力機能（WAV）
   const exportAudio = async () => {
+    if (!isDownloadSupported()) {
+      // 重い合成処理をしてから保存できないと分かるのを避ける
+      setError('この端末のブラウザはファイルの保存に対応していません（iPad は iPadOS 13 以降が必要です）。');
+      return;
+    }
     const ctx = audioContextRef.current;
     if (!ctx) {
       setError('AudioContextが初期化されていません。');
@@ -1349,7 +1401,10 @@ const DAWPage = () => {
   const resetProject = async () => {
     haltPlayback(true);
     try {
-      await backupAndClearProjectAutoSave();
+      // 旧形式（localStorage）にしか作業内容が無い場合は、それをバックアップする
+      await backupAndClearProjectAutoSave(readLegacyAutoSave());
+      legacyHandledRef.current = true;
+      setHasBackup(true);
     } catch (resetError) {
       console.error('自動保存データのクリアに失敗:', resetError);
       if (!isProjectLoadedRef.current) {
@@ -1358,7 +1413,7 @@ const DAWPage = () => {
         return;
       }
     }
-    if (isProjectLoadedRef.current) removeLegacyAutoSave();
+    removeLegacyAutoSave();
 
     // 初期状態にリセット
     const initialTracks = createInitialTracks();
@@ -1372,6 +1427,27 @@ const DAWPage = () => {
     setSaveStatus('idle');
     setIsProjectLoaded(true);
     alert('プロジェクトをリセットしました');
+  };
+
+  // 1 つ前の作業に戻す（リセットや先生の楽曲で置き換える前の作業内容）。もう一度押すと戻せる。
+  const restorePreviousWork = async () => {
+    if (!window.confirm('1つ前の作業内容に戻します。\n\n今の作業内容は入れ替わりで保存されるので、もう一度押すと元に戻せます。よろしいですか？')) {
+      return;
+    }
+    haltPlayback(false);
+    try {
+      // 今の画面の内容を保存してから入れ替える
+      await flushAutoSave();
+      const restored = await swapProjectAutoSaveWithBackup();
+      if (!restored || !isMountedRef.current) return;
+      lastKnownTimestampRef.current = restored.timestamp || 0;
+      applyProject(deserializeProject(restored));
+      suppressAutoSaveTracksRef.current = tracksRef.current;
+      setError(null);
+    } catch (restoreError) {
+      console.error('1つ前の作業内容に戻せませんでした:', restoreError);
+      setError('1つ前の作業内容に戻せませんでした。');
+    }
   };
 
   const saveStatusView = {
@@ -1451,6 +1527,16 @@ const DAWPage = () => {
               >
                 <Icon icon={RotateCcw} /> リセット
               </button>
+              {hasBackup && isProjectLoaded && (
+                <button
+                  type="button"
+                  className="button-secondary"
+                  onClick={restorePreviousWork}
+                  title="リセットや先生の楽曲を開く前の作業内容に戻す"
+                >
+                  <Icon icon={History} /> 1つ前の作業に戻す
+                </button>
+              )}
               <button
                 type="button"
                 className="button-primary"
@@ -1510,7 +1596,12 @@ const DAWPage = () => {
         </div>
       </div>
 
-      <div className={`daw-main-area ${isInitialLoading ? 'is-loading' : ''}`} aria-busy={isInitialLoading} {...(isInitialLoading ? { inert: '' } : {})}>
+      {/* 読み込み中と、読み込みに失敗して自動保存が止まっている間は、保存されない編集をさせない */}
+      <div
+        className={`daw-main-area ${isInitialLoading || saveStatus === 'disabled' ? 'is-loading' : ''}`}
+        aria-busy={isInitialLoading}
+        {...(isInitialLoading || saveStatus === 'disabled' ? { inert: '' } : {})}
+      >
         <div className={`sound-panel ${!showSoundPanel ? 'panel-hidden' : ''}`}>
           <div className="sound-panel-header">
             <h3><Icon icon={Music} /> 音素材</h3>
@@ -2103,7 +2194,7 @@ const AudioClip = ({ clip, trackId, onRemove, onDragStart, onDragEnd, onTouchDra
         <span className="clip-name">{clip.soundData.name || '不明な音素材'}</span>
         <button
           type="button"
-          className="remove-clip-btn touch-target-expand"
+          className="remove-clip-btn"
           onClick={onRemove}
           title="クリップを削除"
           aria-label={`${clip.soundData.name || 'クリップ'}を削除`}

@@ -53,7 +53,7 @@ test('<audio> には中身に合った MIME の Data URL を渡し、一覧を�
   await renderLibrary();
   const audio = cardFor('たいこ').querySelector('audio');
   expect(audio.getAttribute('src').startsWith('data:audio/mp4;base64,')).toBe(true);
-  expect(audio.getAttribute('preload')).toBe('metadata');
+  expect(audio.getAttribute('preload')).toBe('none'); // 音素材が多いと古い iPad でメモリが足りなくなるため
 });
 
 test('名前とタグで検索、タグで絞り込み、クリアできる', async () => {

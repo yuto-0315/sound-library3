@@ -483,7 +483,7 @@ const CloudPage = () => {
                       controls 
                       src={sound.audioData || undefined}
                       className="mini-audio-player"
-                      preload="metadata"
+                      preload="none"
                       playsInline
                       onClick={(e) => e.stopPropagation()}
                       onError={(e) => {

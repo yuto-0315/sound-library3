@@ -144,7 +144,9 @@ const runTransaction = (storeNames, mode, executor) => openDB().then((db) => new
     try {
       tx.abort();
     } catch (error) {
-      // 既に終了している
+      // abort できない = 既に書き込みの確定に入っている。失敗扱いにすると「保存できていないのに
+      // 保存済み」の逆（保存できたのに失敗扱い）になるので、complete / abort の結果を待つ
+      return;
     }
     finish(reject, new Error('データベースの処理が時間内に終わりませんでした'));
   }, TRANSACTION_TIMEOUT_MS);
@@ -228,24 +230,60 @@ export const deleteProjectAutoSave = async () => {
   return true;
 };
 
-// 自動保存を消す前に、1 つ前の作業内容としてバックアップに移す（1 つのトランザクションで行う）
-export const backupAndClearProjectAutoSave = () => runTransaction([STORE_NAME_SONGS], 'readwrite', (tx) => {
+// クリップが 1 つでもある作業内容か（空の作業内容で大事なバックアップを上書きしないため）
+const hasClips = (project) => !!project && Array.isArray(project.tracks) &&
+  project.tracks.some((track) => track && Array.isArray(track.clips) && track.clips.length > 0);
+
+// 自動保存を消す前に、1 つ前の作業内容としてバックアップに移す（1 つのトランザクションで行う）。
+// IndexedDB に自動保存が無い場合は fallbackData（旧形式の localStorage の作業内容など）をバックアップする。
+export const backupAndClearProjectAutoSave = (fallbackData = null) => runTransaction([STORE_NAME_SONGS], 'readwrite', (tx) => {
   const store = tx.objectStore(STORE_NAME_SONGS);
   const request = store.get(AUTOSAVE_KEY);
   request.onsuccess = () => {
     if (request.result) {
-      store.put({ ...request.result, id: AUTOSAVE_BACKUP_KEY, backedUpAt: Date.now() });
+      if (hasClips(request.result.data)) {
+        store.put({ ...request.result, id: AUTOSAVE_BACKUP_KEY, backedUpAt: Date.now() });
+      }
       store.delete(AUTOSAVE_KEY);
+    } else if (hasClips(fallbackData)) {
+      store.put({ id: AUTOSAVE_BACKUP_KEY, data: fallbackData, timestamp: Date.now(), backedUpAt: Date.now() });
     }
   };
 });
 
 export const getProjectAutoSaveBackup = () => getSongRecord(AUTOSAVE_BACKUP_KEY);
 
+// 「1 つ前の作業に戻す」: 自動保存とバックアップを入れ替える（もう一度押せば元に戻る）。
+// 戻した作業内容を返す（バックアップが無ければ null）。
+export const swapProjectAutoSaveWithBackup = () => runTransaction([STORE_NAME_SONGS], 'readwrite', (tx, setResult) => {
+  const store = tx.objectStore(STORE_NAME_SONGS);
+  const backupRequest = store.get(AUTOSAVE_BACKUP_KEY);
+  backupRequest.onsuccess = () => {
+    const backup = backupRequest.result;
+    if (!backup) {
+      setResult(null);
+      return;
+    }
+    const currentRequest = store.get(AUTOSAVE_KEY);
+    currentRequest.onsuccess = () => {
+      const current = currentRequest.result;
+      const restored = { ...backup.data, timestamp: Date.now() };
+      store.put({ id: AUTOSAVE_KEY, data: restored, timestamp: Date.now() });
+      if (current) {
+        store.put({ ...current, id: AUTOSAVE_BACKUP_KEY, backedUpAt: Date.now() });
+      } else {
+        store.delete(AUTOSAVE_BACKUP_KEY);
+      }
+      setResult(restored);
+    };
+  };
+});
+
 // 先生ページから渡された楽曲を、そのまま新しい自動保存として確定する。
 // 「今の作業内容をバックアップ → 楽曲を自動保存に書く → 渡された楽曲を消す」を 1 つのトランザクションで
 // 行うので、途中でページを離れても楽曲が失われたり、同じ楽曲が何度も読み込まれたりしない。
-export const promoteImportedSongToAutoSave = () => runTransaction([STORE_NAME_SONGS], 'readwrite', (tx, setResult) => {
+// IndexedDB に自動保存が無い場合は fallbackData（旧形式の作業内容など）をバックアップする。
+export const promoteImportedSongToAutoSave = (fallbackData = null) => runTransaction([STORE_NAME_SONGS], 'readwrite', (tx, setResult) => {
   const store = tx.objectStore(STORE_NAME_SONGS);
   const importRequest = store.get(IMPORT_SONG_KEY);
   importRequest.onsuccess = () => {
@@ -256,10 +294,13 @@ export const promoteImportedSongToAutoSave = () => runTransaction([STORE_NAME_SO
     }
     const currentRequest = store.get(AUTOSAVE_KEY);
     currentRequest.onsuccess = () => {
-      if (currentRequest.result) {
+      if (currentRequest.result && hasClips(currentRequest.result.data)) {
         store.put({ ...currentRequest.result, id: AUTOSAVE_BACKUP_KEY, backedUpAt: Date.now() });
+      } else if (!currentRequest.result && hasClips(fallbackData)) {
+        store.put({ id: AUTOSAVE_BACKUP_KEY, data: fallbackData, timestamp: Date.now(), backedUpAt: Date.now() });
       }
-      store.put({ id: AUTOSAVE_KEY, data: imported.data, timestamp: Date.now(), importedAt: Date.now() });
+      // 別のタブが「新しい内容」と判断できるよう、取り込んだ時刻を作業内容の時刻にする
+      store.put({ id: AUTOSAVE_KEY, data: { ...imported.data, timestamp: Date.now() }, timestamp: Date.now(), importedAt: Date.now() });
       store.delete(IMPORT_SONG_KEY);
       setResult(true);
     };

@@ -318,7 +318,7 @@ const LibrarySoundCard = ({ sound, onDelete, onAddTag, onRemoveTag }) => {
         controls 
         src={sound.audioData || undefined}
         className="sound-player"
-        preload="metadata"
+        preload="none"
         playsInline
         onError={(e) => {
           console.error('音声の読み込みエラー:', e, 'sound:', sound.name);

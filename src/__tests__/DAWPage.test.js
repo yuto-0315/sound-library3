@@ -4,7 +4,7 @@
 //   通っていたテストも中身の検証が無いものだったため書き直した。
 //   保存・再生・ドラッグの詳しい回帰テストは DAWPage.persistence / DAWPage.interaction にある）
 import React from 'react';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import DAWPage from '../pages/DAWPage';
 import { addRecording, saveProjectAutoSave } from '../utils/indexedDB';
@@ -37,7 +37,11 @@ describe('DAWPage Component', () => {
     jest.spyOn(console, 'log').mockImplementation(() => {});
   });
 
-  afterEach(() => {
+  // 画面を片付けてから、アンマウント時の保存が終わるのを待つ（次のテストが差し替えた
+  // localStorage や IndexedDB に前のテストの保存処理が書き込まないように）
+  afterEach(async () => {
+    cleanup();
+    await new Promise((resolve) => setTimeout(resolve, 30));
     jest.restoreAllMocks();
   });
 

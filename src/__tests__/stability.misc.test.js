@@ -187,6 +187,31 @@ describe('useTouchDrag', () => {
     expect(handlers.onStart).not.toHaveBeenCalled();
   });
 
+  test('2 本目の指を離してもドラッグは終わらず、最初の指を離したときに終わる', () => {
+    const { handlers, box } = setup();
+    const dispatch = (type, touches) => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperty(event, 'touches', { value: touches });
+      act(() => {
+        box.dispatchEvent(event);
+      });
+      return event;
+    };
+    const first = { identifier: 1, clientX: 10, clientY: 10 };
+    dispatch('touchstart', [first]);
+    dispatch('touchmove', [{ ...first, clientX: 60 }]);
+    expect(handlers.onStart).toHaveBeenCalled();
+    // 2 本目の指が触れて、離れる（最初の指はまだ触れている）
+    dispatch('touchstart', [{ ...first, clientX: 60 }, { identifier: 2, clientX: 300, clientY: 300 }]);
+    dispatch('touchend', [{ ...first, clientX: 60 }]);
+    expect(handlers.onEnd).not.toHaveBeenCalled();
+    // 2 本目の指の動きは無視して、最初の指だけを追う
+    dispatch('touchmove', [{ identifier: 2, clientX: 999, clientY: 999 }, { ...first, clientX: 80 }]);
+    expect(handlers.onMove).toHaveBeenLastCalledWith({ x: 80, y: 10 });
+    dispatch('touchend', []);
+    expect(handlers.onEnd).toHaveBeenCalledWith({ x: 80, y: 10 });
+  });
+
   test('ドラッグ中にアンマウントされたら onCancel を呼ぶ', () => {
     const handlers = { onStart: jest.fn(), onCancel: jest.fn() };
     const { unmount } = render(<Draggable handlers={handlers} />);

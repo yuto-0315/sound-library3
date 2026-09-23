@@ -85,7 +85,15 @@ export const useTouchDrag = ({ onStart, onMove, onEnd, onCancel, shouldStart, th
     const element = elementRef.current;
     if (!element) return undefined;
 
-    const state = { tracking: false, dragging: false, startX: 0, startY: 0, x: 0, y: 0, target: null };
+    const state = { tracking: false, dragging: false, startX: 0, startY: 0, x: 0, y: 0, target: null, touchId: null };
+    // 最初に触れた指だけを追う（2 本目の指の動きや、2 本目の指を離したことに反応しない）
+    const findTrackedTouch = (touchList) => {
+      if (!touchList) return null;
+      for (let i = 0; i < touchList.length; i++) {
+        if (touchList[i].identifier === state.touchId) return touchList[i];
+      }
+      return null;
+    };
     const call = (name, payload) => {
       const handler = handlersRef.current[name];
       if (handler) handler(payload);
@@ -102,6 +110,7 @@ export const useTouchDrag = ({ onStart, onMove, onEnd, onCancel, shouldStart, th
       const touch = event.touches[0];
       state.tracking = true;
       state.dragging = false;
+      state.touchId = touch.identifier;
       state.startX = touch.clientX;
       state.startY = touch.clientY;
       state.x = touch.clientX;
@@ -111,7 +120,8 @@ export const useTouchDrag = ({ onStart, onMove, onEnd, onCancel, shouldStart, th
 
     const handleTouchMove = (event) => {
       if (!state.tracking) return;
-      const touch = event.touches[0];
+      const touch = findTrackedTouch(event.touches) || event.touches[0];
+      if (!touch) return;
       state.x = touch.clientX;
       state.y = touch.clientY;
 
@@ -140,6 +150,11 @@ export const useTouchDrag = ({ onStart, onMove, onEnd, onCancel, shouldStart, th
     };
 
     const handleTouchEnd = (event) => {
+      // 離れたのが 2 本目の指なら、最初の指のドラッグを続ける
+      if (findTrackedTouch(event.touches)) {
+        if (state.dragging && event.cancelable) event.preventDefault();
+        return;
+      }
       // ドラッグ後の「クリック」を発生させない（指を離した所のボタンが押されるのを防ぐ）
       if (state.dragging && event.cancelable) event.preventDefault();
       finish('onEnd');

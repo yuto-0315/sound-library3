@@ -5,6 +5,7 @@ import {
   backupAndClearProjectAutoSave,
   getProjectAutoSaveBackup,
   promoteImportedSongToAutoSave,
+  swapProjectAutoSaveWithBackup,
   clearAllData,
   deleteProjectAutoSave,
   deleteRecording,
@@ -293,46 +294,83 @@ describe('楽曲データと DAW の自動保存', () => {
 });
 
 describe('先生ページからの楽曲の確定とバックアップ', () => {
+  const work = (name) => ({ kind: name, tracks: [{ id: 1, clips: [{ id: 1, soundData: { name } }] }] });
+  const emptyWork = () => ({ kind: 'empty', tracks: [{ id: 1, clips: [] }] });
+
   test('渡された楽曲を自動保存にし、それまでの作業内容をバックアップして、渡された楽曲を消す（1 回で）', async () => {
-    await saveProjectAutoSave({ kind: 'mine', timestamp: 1 });
-    await saveSongData({ kind: 'teacher', timestamp: 2 });
+    await saveProjectAutoSave(work('mine'));
+    await saveSongData({ kind: 'teacher', tracks: [] });
     const before = idb.log.length;
     await expect(promoteImportedSongToAutoSave()).resolves.toBe(true);
     expect(idb.log.slice(before).filter((entry) => entry.type === 'commit')).toHaveLength(1);
     const autoSave = await getProjectAutoSave();
     expect(autoSave.kind).toBe('teacher');
-    await expect(getProjectAutoSaveBackup()).resolves.toEqual({ kind: 'mine', timestamp: 1 });
+    expect(typeof autoSave.timestamp).toBe('number'); // 別のタブが新しい内容だと分かるように
+    await expect(getProjectAutoSaveBackup()).resolves.toEqual(work('mine'));
     await expect(getSongData()).resolves.toBeNull();
   });
 
   test('確定に失敗したら何も変えない（途中まで書かれた状態にならない）', async () => {
-    await saveProjectAutoSave({ kind: 'mine' });
+    await saveProjectAutoSave(work('mine'));
     await saveSongData({ kind: 'teacher' });
     idb.failNextCommit(quotaError());
     await expect(promoteImportedSongToAutoSave()).rejects.toBeTruthy();
-    await expect(getProjectAutoSave()).resolves.toEqual({ kind: 'mine' });
+    await expect(getProjectAutoSave()).resolves.toEqual(work('mine'));
     await expect(getSongData()).resolves.toEqual({ kind: 'teacher' });
     await expect(getProjectAutoSaveBackup()).resolves.toBeNull();
   });
 
   test('渡された楽曲が無ければ何もしない', async () => {
-    await saveProjectAutoSave({ kind: 'mine' });
+    await saveProjectAutoSave(work('mine'));
     await expect(promoteImportedSongToAutoSave()).resolves.toBe(false);
-    await expect(getProjectAutoSave()).resolves.toEqual({ kind: 'mine' });
+    await expect(getProjectAutoSave()).resolves.toEqual(work('mine'));
+  });
+
+  test('IndexedDB に作業内容が無ければ、旧形式の作業内容をバックアップする', async () => {
+    await saveSongData({ kind: 'teacher' });
+    await promoteImportedSongToAutoSave(work('legacy'));
+    await expect(getProjectAutoSaveBackup()).resolves.toEqual(work('legacy'));
+  });
+
+  test('空の作業内容で、大事なバックアップを上書きしない（リセット→先生の楽曲 の順でも自分の作業が残る）', async () => {
+    await saveProjectAutoSave(work('mine'));
+    await backupAndClearProjectAutoSave(); // リセット: バックアップ = 自分の作業
+    await saveProjectAutoSave(emptyWork()); // リセット後の空の作業内容
+    await saveSongData({ kind: 'teacher' });
+    await promoteImportedSongToAutoSave(); // 先生の楽曲を開く
+    await expect(getProjectAutoSaveBackup()).resolves.toEqual(work('mine'));
   });
 
   test('リセット用: 自動保存をバックアップに移してから消す', async () => {
-    await saveProjectAutoSave({ kind: 'mine' });
+    await saveProjectAutoSave(work('mine'));
     await backupAndClearProjectAutoSave();
     await expect(getProjectAutoSave()).resolves.toBeNull();
-    await expect(getProjectAutoSaveBackup()).resolves.toEqual({ kind: 'mine' });
+    await expect(getProjectAutoSaveBackup()).resolves.toEqual(work('mine'));
   });
 
   test('自動保存が無いときのリセットではバックアップを上書きしない', async () => {
-    await saveProjectAutoSave({ kind: 'old' });
+    await saveProjectAutoSave(work('old'));
     await backupAndClearProjectAutoSave();
     await backupAndClearProjectAutoSave();
-    await expect(getProjectAutoSaveBackup()).resolves.toEqual({ kind: 'old' });
+    await expect(getProjectAutoSaveBackup()).resolves.toEqual(work('old'));
+  });
+
+  test('1 つ前の作業に戻す: 自動保存とバックアップを入れ替え、もう一度で元に戻る', async () => {
+    await saveProjectAutoSave(work('before'));
+    await backupAndClearProjectAutoSave();
+    await saveProjectAutoSave(work('after'));
+    const restored = await swapProjectAutoSaveWithBackup();
+    expect(restored.kind).toBe('before');
+    expect((await getProjectAutoSave()).kind).toBe('before');
+    expect((await getProjectAutoSaveBackup()).kind).toBe('after');
+    const again = await swapProjectAutoSaveWithBackup();
+    expect(again.kind).toBe('after');
+  });
+
+  test('バックアップが無ければ何もしない', async () => {
+    await saveProjectAutoSave(work('mine'));
+    await expect(swapProjectAutoSaveWithBackup()).resolves.toBeNull();
+    expect((await getProjectAutoSave()).kind).toBe('mine');
   });
 });
 

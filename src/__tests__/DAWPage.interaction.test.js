@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import DAWPage from '../pages/DAWPage';
 import { addRecording, getAllRecordings, getProjectAutoSave, saveProjectAutoSave } from '../utils/indexedDB';
 import { serializeProject } from '../utils/project';
@@ -42,7 +42,11 @@ beforeEach(() => {
   jest.spyOn(console, 'error').mockImplementation(() => {});
 });
 
-afterEach(() => {
+// 画面を片付けてから、アンマウント時の保存が終わるのを待つ（次のテストが差し替えた
+// localStorage や IndexedDB に前のテストの保存処理が書き込まないように）
+afterEach(async () => {
+  cleanup();
+  await new Promise((resolve) => setTimeout(resolve, 30));
   jest.restoreAllMocks();
   delete global.fetch;
 });
@@ -374,6 +378,12 @@ describe('ドラッグ&ドロップ（マウス / iPad の長押しドラッグ�
     fireEvent.dragEnd(clip, { dataTransfer, clientX: 5000, clientY: 5000 });
     expect(clipElements(container)).toHaveLength(1);
     expect(clipElements(container)[0].style.left).toBe('100px');
+  });
+
+  test('クリップの × は押せる範囲を広げない（短いクリップをドラッグしようとして消してしまわないように）', async () => {
+    await seedProject([drumClip(1, 0)]);
+    await renderDAW();
+    expect(screen.getByRole('button', { name: 'たいこを削除' })).not.toHaveClass('touch-target-expand');
   });
 
   test('クリップの × ボタンで削除できる', async () => {

@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import SoundCollection from '../pages/SoundCollection';
 import { getAllRecordings } from '../utils/indexedDB';
 import { installFakeIndexedDB } from '../test-utils/fakeIndexedDB';
@@ -61,7 +61,11 @@ beforeEach(() => {
   jest.spyOn(console, 'warn').mockImplementation(() => {});
 });
 
-afterEach(() => {
+// 画面を片付けてから、アンマウント時の保存が終わるのを待つ（次のテストが差し替えた
+// localStorage や IndexedDB に前のテストの保存処理が書き込まないように）
+afterEach(async () => {
+  cleanup();
+  await new Promise((resolve) => setTimeout(resolve, 30));
   jest.restoreAllMocks();
 });
 
@@ -154,18 +158,44 @@ describe('録音と保存', () => {
     expect(document.querySelector('.recordings-grid audio').getAttribute('src')).toBe('blob:rec-1');
   });
 
-  test('保存中に次の録音をしても、保存した音も次の音も使える', async () => {
+  test('保存中は次の録音・ファイル選択を始められない（保存に失敗したとき音が消えないように）', async () => {
     render(<SoundCollection />);
     await record();
     fireEvent.change(screen.getByLabelText(/音の名前/), { target: { value: '1つ目' } });
     fireEvent.click(screen.getByRole('button', { name: /保存/ }));
-    // 保存が終わる前に次の録音
-    fireEvent.click(screen.getByRole('button', { name: /録音開始/ }));
-    fireEvent.click(await screen.findByRole('button', { name: /録音停止/ }));
+    expect(screen.getByRole('button', { name: /録音開始/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /ファイルを選択/ })).toBeDisabled();
     expect(await screen.findByText('1つ目')).toBeInTheDocument();
     expect(URL.revokeObjectURL).not.toHaveBeenCalledWith('blob:rec-1');
-    // 次の音の編集画面は残っている
-    await waitFor(() => expect(screen.getByLabelText(/音の名前/)).toHaveValue(''));
+    // 保存が終われば次の録音ができる
+    await waitFor(() => expect(screen.getByRole('button', { name: /録音開始/ })).not.toBeDisabled());
+  });
+
+  test('保存中にほかのページへ移動して保存に失敗しても、戻ると入力した名前ごと復元される', async () => {
+    const { unmount } = render(<SoundCollection />);
+    await record();
+    idb.failNextCommit(Object.assign(new Error('quota'), { name: 'QuotaExceededError' }));
+    fireEvent.change(screen.getByLabelText(/音の名前/), { target: { value: '大事な音' } });
+    fireEvent.click(screen.getByRole('button', { name: /保存/ }));
+    unmount();
+    await waitFor(() => expect(hasUnsavedDraft()).toBe(true));
+    render(<SoundCollection />);
+    expect(await screen.findByLabelText(/音の名前/)).toHaveValue('大事な音');
+  });
+
+  test('名前を入力している途中でほかのページへ移動しても、入力した名前とタグが戻る', async () => {
+    const { unmount } = render(<SoundCollection />);
+    await record();
+    fireEvent.change(screen.getByLabelText(/音の名前/), { target: { value: '書きかけ' } });
+    const tagInput = screen.getByLabelText(/タグ/);
+    fireEvent.change(tagInput, { target: { value: '自然' } });
+    fireEvent.keyDown(tagInput, { key: 'Enter', keyCode: 13 });
+    unmount();
+    render(<SoundCollection />);
+    expect(await screen.findByLabelText(/音の名前/)).toHaveValue('書きかけ');
+    expect(document.querySelector('.tags-list')).toHaveTextContent('自然');
+    // 復元した音の再生用 URL も作り直されている
+    await waitFor(() => expect(document.querySelector('#audio-preview').getAttribute('src')).toMatch(/^blob:rec-/));
   });
 
   test('録音が自動的に止まった場合（マイクが切れたなど）も「録音中」の表示を戻す', async () => {

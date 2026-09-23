@@ -30,7 +30,7 @@
     "eject": "react-scripts eject",
     "rm": "rm -rf docs",
     "mv": "mv build docs",
-    "git": "git add . && git commit -m 'Deploy to GitHub Pages' && git push origin main",
+    "git": "git add docs && git commit -m 'Deploy to GitHub Pages' && git push origin main",
     "deploy": "npm run rm && npm run build && npm run mv && npm run git",
     "lint": "npx eslint src/ --ext .js,.jsx",
     "lint:fix": "npx eslint src/ --ext .js,.jsx --fix"

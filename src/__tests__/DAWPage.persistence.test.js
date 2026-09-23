@@ -213,6 +213,20 @@ describe('自動保存と復元（ページ移動でタイムラインが消え�
   });
 });
 
+describe('読み込み中の操作', () => {
+  test('前回の作業内容を読み込んでいる間は操作できないようにする（置いたクリップが上書きで消えるのを防ぐ）', async () => {
+    await saveProjectAutoSave(projectWithClips());
+    const { container } = render(<DAWPage />);
+    expect(screen.getByText('前回の作業内容を読み込んでいます...')).toBeInTheDocument();
+    expect(container.querySelector('.daw-main-area')).toHaveClass('is-loading');
+    expect(container.querySelector('.daw-main-area')).toHaveAttribute('aria-busy', 'true');
+    expect(container.querySelector('.daw-controls')).toHaveClass('is-loading');
+    await waitForLoaded();
+    expect(container.querySelector('.daw-main-area')).not.toHaveClass('is-loading');
+    expect(container.querySelector('.daw-main-area')).toHaveAttribute('aria-busy', 'false');
+  });
+});
+
 describe('先生ページからの楽曲インポート', () => {
   test('既存の音素材を上書きせず、新しい ID で音素材を追加する（以前は ID が重なって消えていた）', async () => {
     const { drumId, bellId } = await seedLibrary();

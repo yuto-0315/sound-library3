@@ -1931,3 +1931,10 @@ body.dragging .tracks-area {
   opacity: 0.35;
   cursor: not-allowed;
 }
+
+/* 前回の作業内容を読み込んでいる間は操作させない */
+.daw-controls.is-loading,
+.daw-main-area.is-loading {
+  pointer-events: none;
+  opacity: 0.6;
+}

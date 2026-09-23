@@ -1303,7 +1303,8 @@ const DAWPage = () => {
         <div className="daw-loading" role="status">前回の作業内容を読み込んでいます...</div>
       )}
 
-      <div className="daw-controls card">
+      {/* 読み込み中に置いたクリップは読み込み完了時に上書きされて消えてしまうので、操作できないようにする */}
+      <div className={`daw-controls card ${isInitialLoading ? 'is-loading' : ''}`} aria-busy={isInitialLoading}>
         {/* 上段：音素材表示切り替え、保存関連機能 */}
         <div className="top-controls-row">
           <div className="left-controls">
@@ -1409,7 +1410,7 @@ const DAWPage = () => {
         </div>
       </div>
 
-      <div className="daw-main-area">
+      <div className={`daw-main-area ${isInitialLoading ? 'is-loading' : ''}`} aria-busy={isInitialLoading}>
         <div className={`sound-panel ${!showSoundPanel ? 'panel-hidden' : ''}`}>
           <div className="sound-panel-header">
             <h3><Icon icon={Music} /> 音素材</h3>

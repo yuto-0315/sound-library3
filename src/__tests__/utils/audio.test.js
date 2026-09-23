@@ -359,11 +359,13 @@ describe('iOS 判定と消音モード対策', () => {
     expect(isIOSDevice()).toBe(false);
   });
 
-  test('audioSession API があれば playback にする（iOS 17 以降）', () => {
+  test('audioSession API があれば playback にし、止めたら auto に戻す（iOS 17 以降）', () => {
     const audioSession = { type: 'auto' };
     Object.defineProperty(navigator, 'audioSession', { value: audioSession, configurable: true });
     enableSilentModePlayback();
     expect(audioSession.type).toBe('playback');
+    disableSilentModePlayback();
+    expect(audioSession.type).toBe('auto');
     delete navigator.audioSession;
   });
 

@@ -299,6 +299,7 @@ const getSilentWavDataUrl = () => {
 };
 
 let silentAudioElement = null;
+let audioSessionChanged = false;
 
 // iPad の消音（マナー）モードでは Web Audio の音が消される。
 // iOS 17 以降は audioSession API、それ以前は無音の <audio> をループ再生して
@@ -308,6 +309,7 @@ export const enableSilentModePlayback = () => {
   try {
     if (typeof navigator !== 'undefined' && navigator.audioSession && 'type' in navigator.audioSession) {
       navigator.audioSession.type = 'playback';
+      audioSessionChanged = true;
       return;
     }
   } catch (error) {
@@ -333,6 +335,15 @@ export const enableSilentModePlayback = () => {
 };
 
 export const disableSilentModePlayback = () => {
+  // 再生を止めたら元に戻す（playback のままだと、あとで録音するときに影響することがある）
+  if (audioSessionChanged) {
+    try {
+      navigator.audioSession.type = 'auto';
+    } catch (error) {
+      // 無視
+    }
+    audioSessionChanged = false;
+  }
   if (!silentAudioElement) return;
   try {
     silentAudioElement.pause();

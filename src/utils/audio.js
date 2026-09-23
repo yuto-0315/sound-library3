@@ -152,8 +152,10 @@ export const withDetectedMimeType = async (blob) => {
 
 // ========== 録音 ==========
 
-// mp4 (AAC) を最優先: すべての iPad で再生でき、PC とクラウド共有しても互換性が高い
+// mp4 (AAC) を最優先: すべての iPad で再生でき、PC とクラウド共有しても互換性が高い。
+// Chrome は「audio/mp4」だけだと中身が Opus になり古い iPad で再生できないので、AAC を明示する。
 const RECORDING_MIME_CANDIDATES = [
+  'audio/mp4;codecs=mp4a.40.2',
   'audio/mp4',
   'audio/webm;codecs=opus',
   'audio/webm',

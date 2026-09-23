@@ -243,8 +243,13 @@ describe('録音形式の選択', () => {
     global.MediaRecorder = originalMediaRecorder;
   });
 
-  test('mp4 に対応していれば mp4 を選ぶ（すべての iPad で再生できる）', () => {
+  test('AAC の mp4 に対応していれば最優先で選ぶ（すべての iPad で再生できる）', () => {
     global.MediaRecorder = { isTypeSupported: jest.fn(() => true) };
+    expect(getSupportedRecordingMimeType()).toBe('audio/mp4;codecs=mp4a.40.2');
+  });
+
+  test('コーデック指定に非対応なら audio/mp4 を選ぶ', () => {
+    global.MediaRecorder = { isTypeSupported: jest.fn((type) => type === 'audio/mp4' || type.startsWith('audio/webm')) };
     expect(getSupportedRecordingMimeType()).toBe('audio/mp4');
   });
 

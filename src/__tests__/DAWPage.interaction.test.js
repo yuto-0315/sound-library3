@@ -217,6 +217,17 @@ describe('再生（Web Audio）', () => {
     expect(screen.getByRole('button', { name: '再生' })).toBeInTheDocument();
   });
 
+  test('電話や Siri の後で resume() が終わらなくても「再生中」のまま固まらない', async () => {
+    audioContext = createMockAudioContext({ state: 'interrupted' });
+    audioContext.resume = jest.fn(() => new Promise(() => {})); // いつまでも終わらない
+    window.AudioContext = jest.fn(() => audioContext);
+    await seedProject([drumClip(1, 0)]);
+    await renderDAW();
+    fireEvent.click(screen.getByRole('button', { name: '再生' }));
+    expect(await screen.findByText(/もう一度「再生」ボタンを押してください/, {}, { timeout: 3000 })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '再生' })).toBeInTheDocument();
+  });
+
   test('AudioContext が使えないブラウザではエラーを表示する', async () => {
     window.AudioContext = jest.fn(() => { throw new Error('not supported'); });
     await renderDAW();
@@ -446,6 +457,44 @@ describe('タッチ操作でのドラッグ', () => {
     touchEvent('touchend', item, 80, 10);
     await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
     expect(clipElements(container)).toHaveLength(0);
+  });
+
+  test('幅の狭い画面（音素材が横に並ぶ）では、横はリストのスクロール、縦（タイムラインの方向）でドラッグ', async () => {
+    await seedLibrary();
+    const { container } = await renderDAW();
+    const list = container.querySelector('.sound-list');
+    list.style.flexDirection = 'row'; // max-width: 768px の CSS と同じ状態
+    const item = (await within(list).findByText('すず')).closest('.sound-item');
+    document.elementFromPoint = jest.fn(() => trackElements(container)[0]);
+
+    touchEvent('touchstart', item, 10, 10);
+    const horizontal = touchEvent('touchmove', item, 80, 12);
+    expect(horizontal.defaultPrevented).toBe(false); // 横はスクロールさせる
+    touchEvent('touchend', item, 80, 12);
+
+    touchEvent('touchstart', item, 10, 10);
+    const vertical = touchEvent('touchmove', item, 12, 200);
+    expect(vertical.defaultPrevented).toBe(true); // 下のタイムラインへはドラッグ
+    touchEvent('touchend', item, 12, 200);
+    await waitFor(() => expect(clipElements(container)).toHaveLength(1));
+  });
+
+  test('ドラッグ中に 2 本目の指が触れてもドラッグは続き、画面はスクロールしない', async () => {
+    await seedProject([drumClip(1, 100)]);
+    const { container } = await renderDAW();
+    const clip = clipElements(container)[0];
+    document.elementFromPoint = jest.fn(() => trackElements(container)[1]);
+    touchEvent('touchstart', clip, 130, 20);
+    touchEvent('touchmove', clip, 130, 100);
+    const second = new Event('touchstart', { bubbles: true, cancelable: true });
+    Object.defineProperty(second, 'touches', { value: [{ clientX: 130, clientY: 100 }, { clientX: 300, clientY: 300 }] });
+    act(() => {
+      clip.dispatchEvent(second);
+    });
+    const move = touchEvent('touchmove', clip, 530, 100);
+    expect(move.defaultPrevented).toBe(true);
+    touchEvent('touchend', clip, 530, 100);
+    await waitFor(() => expect(trackElements(container)[1].querySelectorAll('.audio-clip')).toHaveLength(1));
   });
 
   test('配置済みのクリップを指で別のトラックに移動できる', async () => {

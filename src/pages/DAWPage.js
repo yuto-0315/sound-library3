@@ -30,12 +30,13 @@ import './DAWPage.css';
 import Icon from '../components/Icon';
 import {
   addRecordings,
-  deleteProjectAutoSave,
+  backupAndClearProjectAutoSave,
   deleteSongData,
   getAllRecordings,
   getProjectAutoSave,
   getSongData,
   isQuotaExceededError,
+  promoteImportedSongToAutoSave,
   saveProjectAutoSave
 } from '../utils/indexedDB';
 import {
@@ -140,6 +141,14 @@ const removeLegacyAutoSave = () => {
 
 const timestampForFileName = () => new Date().toISOString().slice(0, 19).replace(/:/g, '-');
 
+// iPad は電話・Siri・他のアプリに音を取られた（interrupted）あと、resume() の Promise が
+// いつまでも終わらないことがある。待ち続けると「再生中」のまま音が出ないので打ち切る。
+const RESUME_TIMEOUT_MS = 1500;
+const withResumeTimeout = (promise) => Promise.race([
+  promise,
+  new Promise((resolve) => setTimeout(resolve, RESUME_TIMEOUT_MS))
+]);
+
 const DAWPage = () => {
   // ユニークID生成用のカウンター
   const trackIdCounterRef = useRef(1);
@@ -152,7 +161,8 @@ const DAWPage = () => {
   //   作業内容が消えていた）
   const [isProjectLoaded, setIsProjectLoaded] = useState(false);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
-  const [saveStatus, setSaveStatus] = useState('idle'); // idle | pending | saving | saved | error
+  const [loadAttempt, setLoadAttempt] = useState(0); // 「もう一度読み込む」で増やす
+  const [saveStatus, setSaveStatus] = useState('idle'); // idle | pending | saving | saved | error | disabled
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0); // 停止中のプレイヘッド位置（ピクセル）
   const [trackHeight] = useState(80);
@@ -197,9 +207,14 @@ const DAWPage = () => {
   const draggedClipRef = useRef(null);
   const dragOffsetRef = useRef(0);
   const draggedSoundWidthRef = useRef(DEFAULT_CLIP_WIDTH);
+  const touchDragFrameRef = useRef({ id: null, args: null });
 
   // 自動保存
   const autoSaveRef = useRef({ saving: false, dirty: false, pending: false });
+  // 最後に読み込んだ・保存した作業内容の時刻（別のタブで保存された新しい内容に気付くため）
+  const lastKnownTimestampRef = useRef(0);
+  // 保存済みの内容を画面に反映しただけのときは、もう一度保存しない
+  const suppressAutoSaveRef = useRef(false);
 
   // イベントハンドラや非同期処理から最新の値を読むための ref
   const tracksRef = useRef(tracks);
@@ -372,7 +387,7 @@ const DAWPage = () => {
       )
     );
 
-    Promise.all([resumePromise, Promise.all(decodeJobs)])
+    Promise.all([withResumeTimeout(resumePromise), Promise.all(decodeJobs)])
       .then(([, results]) => {
         if (session !== playbackSessionRef.current || !isMountedRef.current) return;
 
@@ -438,9 +453,14 @@ const DAWPage = () => {
     const preview = { source: null, onEnded };
     previewRef.current = preview;
 
-    Promise.all([resumePromise, getAudioBuffer(sound)])
+    Promise.all([withResumeTimeout(resumePromise), getAudioBuffer(sound)])
       .then(([, buffer]) => {
         if (previewRef.current !== preview) return;
+        if (ctx.state && ctx.state !== 'running') {
+          stopPreview();
+          if (isMountedRef.current) setError('音を再生できませんでした。もう一度試聴ボタンを押してください。');
+          return;
+        }
         const source = ctx.createBufferSource();
         source.buffer = buffer;
         source.connect(ctx.destination);
@@ -604,26 +624,54 @@ const DAWPage = () => {
     let cancelled = false;
 
     const loadInitialData = async () => {
-      let librarySounds = [];
-      try {
-        librarySounds = hydrateSounds(await getAllRecordings());
-      } catch (loadError) {
-        console.error('音素材の読み込みに失敗:', loadError);
-        if (!cancelled) setError('音素材を読み込めませんでした。ページを再読み込みしてください。');
-      }
-      if (cancelled) return;
-      soundsRef.current = librarySounds;
-      setSounds(librarySounds);
-
       let loadSucceeded = false;
       try {
-        // まず先生ページから渡された楽曲をチェック
+        // 音素材が読めない状態で読み込みを続けると、旧形式の作業内容の音を補えず失われるので、
+        // 音素材の読み込みに失敗したら全体を失敗として扱う（「もう一度読み込む」でやり直せる）
+        const librarySounds = hydrateSounds(await getAllRecordings());
+        if (cancelled) return;
+        soundsRef.current = librarySounds;
+        setSounds(librarySounds);
+
+        // 先生ページから渡された楽曲
+        let imported = false;
         const songData = await getSongData();
         if (cancelled) return;
-
         if (songData) {
-          const project = deserializeProject(songData);
-          applyProject(project);
+          const current = await getProjectAutoSave();
+          if (cancelled) return;
+          const hasWork = !!current && Array.isArray(current.tracks) &&
+            current.tracks.some((track) => Array.isArray(track.clips) && track.clips.length > 0);
+          // 今の作業内容を黙って置き換えない（共用の iPad や先生の端末で作業が消えるのを防ぐ）
+          const accepted = !hasWork || window.confirm(
+            '先生が指定した楽曲を開きます。\n\n今の作業内容はこの楽曲に置き換わります（1つ前の作業内容としてバックアップされます）。よろしいですか？'
+          );
+          if (accepted) {
+            // バックアップ・自動保存への書き込み・渡された楽曲の削除を 1 つのトランザクションで行う
+            imported = await promoteImportedSongToAutoSave();
+          } else {
+            await deleteSongData();
+          }
+          if (cancelled) return;
+        }
+
+        const autoSaved = await getProjectAutoSave();
+        if (cancelled) return;
+        let project = null;
+        if (autoSaved) {
+          project = deserializeProject(autoSaved);
+          lastKnownTimestampRef.current = autoSaved.timestamp || 0;
+        } else {
+          // 旧バージョン（localStorage）の自動保存からの移行
+          const legacy = readLegacyAutoSave();
+          if (legacy && Array.isArray(legacy.tracks)) {
+            const byName = new Map(librarySounds.map((sound) => [sound.name, sound]));
+            project = deserializeProject(legacy, { findSoundByName: (name) => byName.get(name) });
+          }
+        }
+        if (project) applyProject(project);
+
+        if (imported && project) {
           let addedCount = 0;
           try {
             // 使われている音素材を音ライブラリーに追加
@@ -631,49 +679,38 @@ const DAWPage = () => {
           } catch (addError) {
             console.error('音素材の保存に失敗:', addError);
           }
-          try {
-            // 読み込み済みの楽曲は消しておく（消せなくても次回もう一度読み込まれるだけ）
-            await deleteSongData();
-          } catch (deleteError) {
-            console.warn('インポート済み楽曲の削除に失敗:', deleteError);
-          }
           if (cancelled) return;
-          loadSucceeded = true;
           alert(`先生が指定した楽曲を読み込みました!\n使用されている${addedCount}個の音素材を音ライブラリーに追加しました。`);
-        } else {
-          // インポート楽曲がない場合は自動保存データを読み込む
-          const autoSaved = await getProjectAutoSave();
-          if (cancelled) return;
-          if (autoSaved) {
-            applyProject(deserializeProject(autoSaved));
-          } else {
-            // 旧バージョン（localStorage）の自動保存からの移行
-            const legacy = readLegacyAutoSave();
-            if (legacy && Array.isArray(legacy.tracks)) {
-              const byName = new Map(librarySounds.map((sound) => [sound.name, sound]));
-              applyProject(deserializeProject(legacy, { findSoundByName: (name) => byName.get(name) }));
-            }
-          }
-          loadSucceeded = true;
         }
+        loadSucceeded = true;
       } catch (loadError) {
         console.error('プロジェクトデータの読み込みに失敗:', loadError);
-        if (!cancelled) {
-          // 読めなかったデータを空の状態で上書きしないよう、自動保存は止めたままにする
-          setError('前回の作業内容を読み込めませんでした。ページを再読み込みしてください。（このままでは自動保存されません。やり直す場合は「リセット」を押してください）');
-        }
       }
 
       if (cancelled) return;
       setIsInitialLoading(false);
-      if (loadSucceeded) setIsProjectLoaded(true);
+      if (loadSucceeded) {
+        setIsProjectLoaded(true);
+        setSaveStatus('idle');
+      } else {
+        // 読めなかったデータを空の状態で上書きしないよう、自動保存は止めたままにする
+        setSaveStatus('disabled');
+        setError('前回の作業内容を読み込めませんでした。「もう一度読み込む」を押してください。（読み込めるまで自動保存は止めています）');
+      }
     };
 
     loadInitialData();
     return () => {
       cancelled = true;
     };
-  }, [addMissingSoundsToLibrary, applyProject]);
+  }, [addMissingSoundsToLibrary, applyProject, loadAttempt]);
+
+  const retryInitialLoad = () => {
+    setError(null);
+    setSaveStatus('idle');
+    setIsInitialLoading(true);
+    setLoadAttempt((attempt) => attempt + 1);
+  };
 
   const flushAutoSave = useCallback(() => {
     const state = autoSaveRef.current;
@@ -695,11 +732,14 @@ const DAWPage = () => {
 
     state.promise = saveProjectAutoSave(data)
       .then(() => {
+        lastKnownTimestampRef.current = data.timestamp;
         removeLegacyAutoSave();
         if (isMountedRef.current) setSaveStatus('saved');
       })
       .catch((saveError) => {
         console.error('プロジェクトの自動保存に失敗:', saveError);
+        // 保存できていない変更が残っているので、ページを離れるときや次の変更でもう一度保存する
+        state.pending = true;
         if (isMountedRef.current) {
           setSaveStatus('error');
           setError(isQuotaExceededError(saveError)
@@ -720,6 +760,10 @@ const DAWPage = () => {
   // タイムラインデータの自動保存（変更が落ち着いてから保存）
   useEffect(() => {
     if (!isProjectLoaded) return undefined;
+    if (suppressAutoSaveRef.current) {
+      suppressAutoSaveRef.current = false;
+      return undefined;
+    }
     autoSaveRef.current.pending = true;
     setSaveStatus((status) => (status === 'saving' ? status : 'pending'));
     const timer = setTimeout(() => {
@@ -739,8 +783,9 @@ const DAWPage = () => {
         // iPad はバックグラウンドで音を止めるので、再生位置がずれないよう一時停止する
         if (isPlayingRef.current) haltPlaybackRef.current(false);
       } else {
-        // 他のタブで録音した音を反映する
+        // 他のタブで録音した音と、他のタブで保存された新しい作業内容を反映する
         refreshSounds();
+        reloadIfChangedElsewhereRef.current();
       }
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -752,6 +797,28 @@ const DAWPage = () => {
       flushIfPending();
     };
   }, [flushAutoSave, refreshSounds]);
+
+  // 同じ端末の別のタブ（先生ページから「DAWで開く」を何度も押した場合など）で保存された、
+  // より新しい作業内容があれば読み込み直す。読み直さないと、古いタブが次の編集で新しい内容を上書きしてしまう。
+  const reloadIfChangedElsewhere = async () => {
+    const state = autoSaveRef.current;
+    if (!isProjectLoadedRef.current || state.pending || state.saving || isPlayingRef.current || draggedClipRef.current) {
+      return;
+    }
+    try {
+      const stored = await getProjectAutoSave();
+      if (!stored || !isMountedRef.current || autoSaveRef.current.pending) return;
+      if ((stored.timestamp || 0) > lastKnownTimestampRef.current) {
+        lastKnownTimestampRef.current = stored.timestamp || 0;
+        suppressAutoSaveRef.current = true;
+        applyProject(deserializeProject(stored));
+      }
+    } catch (reloadError) {
+      console.warn('他のタブで保存された作業内容を確認できませんでした:', reloadError);
+    }
+  };
+  const reloadIfChangedElsewhereRef = useRef(reloadIfChangedElsewhere);
+  reloadIfChangedElsewhereRef.current = reloadIfChangedElsewhere;
 
   // クラウド保存ダイアログを開いたら入力欄にフォーカスし、Esc で閉じられるようにする
   useEffect(() => {
@@ -906,6 +973,10 @@ const DAWPage = () => {
       clearTimeout(dragOverTimeoutRef.current);
       dragOverTimeoutRef.current = null;
     }
+    if (touchDragFrameRef.current.id !== null) {
+      cancelAnimationFrame(touchDragFrameRef.current.id);
+      touchDragFrameRef.current.id = null;
+    }
     draggedClipRef.current = null;
     dragOffsetRef.current = 0;
     draggedSoundWidthRef.current = DEFAULT_CLIP_WIDTH;
@@ -1018,15 +1089,23 @@ const DAWPage = () => {
     cleanupDragState();
   };
 
-  // タッチ操作: 指がトラックの上を動いている
+  // タッチ操作: 指がトラックの上を動いている。
+  // touchmove ごとに描き直すと古い iPad でカクつくので、1 フレームに 1 回にまとめる。
   const handleTouchDragOver = useCallback((x, y, width, offset) => {
-    const target = findTrackAtPoint(x, y);
-    if (!target) {
-      clearTrackHighlights();
-      setDragPreview(null);
-      return;
-    }
-    showDragPreview(target.element, x, width === null ? draggedSoundWidthRef.current : width, offset);
+    const frame = touchDragFrameRef.current;
+    frame.args = [x, y, width, offset];
+    if (frame.id !== null) return;
+    frame.id = requestAnimationFrame(() => {
+      frame.id = null;
+      const [px, py, pWidth, pOffset] = frame.args;
+      const target = findTrackAtPoint(px, py);
+      if (!target) {
+        clearTrackHighlights();
+        setDragPreview(null);
+        return;
+      }
+      showDragPreview(target.element, px, pWidth === null ? draggedSoundWidthRef.current : pWidth, pOffset);
+    });
   }, [showDragPreview]);
 
   // タッチ操作: 音素材をトラックの上で離した
@@ -1076,7 +1155,9 @@ const DAWPage = () => {
       downloadBlob(blob, `music-project-${timestampForFileName()}.json`);
     } catch (saveError) {
       console.error('プロジェクト保存エラー:', saveError);
-      setError('プロジェクトの保存に失敗しました。');
+      setError(saveError.code === 'DOWNLOAD_UNSUPPORTED'
+        ? saveError.message
+        : 'プロジェクトの保存に失敗しました。');
     }
   };
 
@@ -1256,21 +1337,28 @@ const DAWPage = () => {
       downloadBlob(encodeWav([left, right], sampleRate), `exported-music-${timestampForFileName()}.wav`);
     } catch (exportError) {
       console.error('音源出力エラー:', exportError);
-      setError('音源の出力に失敗しました。');
+      setError(exportError.code === 'DOWNLOAD_UNSUPPORTED'
+        ? exportError.message
+        : '音源の出力に失敗しました。');
     } finally {
       if (isMountedRef.current) setIsExporting(false);
     }
   };
 
-  // プロジェクトをリセット（自動保存データもクリア）
+  // プロジェクトをリセット（自動保存データは 1 つ前の作業内容としてバックアップに移す）
   const resetProject = async () => {
     haltPlayback(true);
     try {
-      await deleteProjectAutoSave();
+      await backupAndClearProjectAutoSave();
     } catch (resetError) {
       console.error('自動保存データのクリアに失敗:', resetError);
+      if (!isProjectLoadedRef.current) {
+        // 読み込めなかった作業内容を、バックアップもできないまま消してしまわない
+        setError('保存されている作業内容を守るため、リセットを中止しました。「もう一度読み込む」を押すか、ページを再読み込みしてください。');
+        return;
+      }
     }
-    removeLegacyAutoSave();
+    if (isProjectLoadedRef.current) removeLegacyAutoSave();
 
     // 初期状態にリセット
     const initialTracks = createInitialTracks();
@@ -1281,6 +1369,7 @@ const DAWPage = () => {
     trackNameCounterRef.current = 1;
     trackIdCounterRef.current = 1;
     setError(null);
+    setSaveStatus('idle');
     setIsProjectLoaded(true);
     alert('プロジェクトをリセットしました');
   };
@@ -1289,7 +1378,8 @@ const DAWPage = () => {
     pending: { icon: Save, text: '保存待ち...' },
     saving: { icon: LoaderCircle, text: '保存中...', className: 'icon-spin' },
     saved: { icon: CircleCheck, text: '自動保存しました' },
-    error: { icon: TriangleAlert, text: '自動保存に失敗' }
+    error: { icon: TriangleAlert, text: '自動保存に失敗' },
+    disabled: { icon: TriangleAlert, text: '自動保存停止中' }
   }[saveStatus];
 
   return (
@@ -1325,6 +1415,11 @@ const DAWPage = () => {
                 <Icon icon={saveStatusView.icon} className={saveStatusView.className} /> {saveStatusView.text}
               </span>
             )}
+            {saveStatus === 'disabled' && (
+              <button type="button" className="button-secondary retry-load-btn" onClick={retryInitialLoad}>
+                <Icon icon={RotateCcw} /> もう一度読み込む
+              </button>
+            )}
           </div>
 
           <div className="right-controls">
@@ -1348,7 +1443,7 @@ const DAWPage = () => {
                 type="button"
                 className="button-warning"
                 onClick={() => {
-                  if (window.confirm('プロジェクトをリセットしますか？\n\n現在の作業内容がすべて削除されます。')) {
+                  if (window.confirm('プロジェクトをリセットしますか？\n\n現在の作業内容は消えます（1つ前の作業内容としてバックアップされます）。')) {
                     resetProject();
                   }
                 }}
@@ -1738,11 +1833,17 @@ const SoundItem = ({ sound, onDragStart, onPreview, onStopPreview, onTouchDragOv
     setIsDragging(false);
   };
 
-  // タッチ操作: 横に動かす、または左端のつまみを持って動かすとドラッグ開始。
-  // 縦に動かしたときは音素材リストのスクロールになる。
+  // タッチ操作: 左端のつまみを持って動かすか、タイムラインの方向へ動かすとドラッグ開始。
+  // それ以外の方向はリストのスクロールになる。
+  // （横長の画面ではリストが縦並びでタイムラインは右 → 横で開始。
+  //   幅 768px 以下ではリストが横並びでタイムラインは下 → 縦で開始）
   const itemRef = useTouchDrag({
-    shouldStart: (dx, dy, target) =>
-      !!(target && target.closest && target.closest('.sound-drag-handle')) || dx > dy,
+    shouldStart: (dx, dy, target) => {
+      if (target && target.closest && target.closest('.sound-drag-handle')) return true;
+      const list = itemRef.current && itemRef.current.closest('.sound-list');
+      const isRowLayout = !!list && window.getComputedStyle(list).flexDirection === 'row';
+      return isRowLayout ? dy > dx : dx > dy;
+    },
     onStart: ({ x, y }) => {
       if (onStopPreview && isPlaying) onStopPreview();
       lockScrollForDrag();

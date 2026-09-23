@@ -17,7 +17,6 @@
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  -webkit-overflow-scrolling: touch; /* 古い iPad で慣性スクロールさせる */
   padding: 20px;
   min-height: 0;
 }

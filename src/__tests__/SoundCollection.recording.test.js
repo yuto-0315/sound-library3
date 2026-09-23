@@ -5,6 +5,7 @@ import { getAllRecordings } from '../utils/indexedDB';
 import { installFakeIndexedDB } from '../test-utils/fakeIndexedDB';
 import { installMemoryLocalStorage } from '../test-utils/storage';
 import { TestFileReader, makeAudioBytes } from '../test-utils/audioFixtures';
+import { hasUnsavedDraft, takeUnsavedDraft } from '../utils/unsavedDraft';
 
 let idb;
 let recorders;
@@ -39,8 +40,10 @@ class FakeMediaRecorder {
 FakeMediaRecorder.isTypeSupported = (type) => type === 'audio/mp4';
 
 beforeEach(() => {
+  takeUnsavedDraft(); // 前のテストで残った「保存前の録音」を捨てる
   idb = installFakeIndexedDB();
   installMemoryLocalStorage();
+  window.confirm = jest.fn(() => true);
   recorders = [];
   tracks = [];
   urlCounter = 0;
@@ -240,7 +243,7 @@ describe('エラー表示', () => {
     global.MediaRecorder = undefined;
     render(<SoundCollection />);
     fireEvent.click(screen.getByRole('button', { name: /録音開始/ }));
-    await waitFor(() => expect(document.querySelector('[role="alert"]').textContent).toContain('iPadOS 14.3 以降'));
+    await waitFor(() => expect(document.querySelector('[role="alert"]').textContent).toContain('iPadOS 14.5 以降'));
     expect(navigator.mediaDevices.getUserMedia).not.toHaveBeenCalled();
   });
 
@@ -300,6 +303,66 @@ describe('ファイルのアップロード', () => {
     const click = jest.spyOn(input, 'click').mockImplementation(() => {});
     fireEvent.click(screen.getByRole('button', { name: /ファイルを選択/ }));
     expect(click).toHaveBeenCalled();
+  });
+});
+
+describe('保存前の録音を失わない', () => {
+  test('名前をつける前にほかのページへ移動しても、戻ると編集画面に復元される', async () => {
+    const { unmount } = render(<SoundCollection />);
+    await record();
+    unmount();
+    expect(hasUnsavedDraft()).toBe(true);
+
+    render(<SoundCollection />);
+    expect(await screen.findByText(/前に録音した音がまだ保存されていません/)).toBeInTheDocument();
+    await saveWithName('あとで保存した音');
+    const [saved] = await getAllRecordings();
+    expect(saved.name).toBe('あとで保存した音');
+    expect(saved.audioData.startsWith('data:audio/mp4;base64,')).toBe(true);
+    expect(hasUnsavedDraft()).toBe(false);
+  });
+
+  test('録音中にほかのページへ移動しても、戻ると録音した音が残っている', async () => {
+    const { unmount } = render(<SoundCollection />);
+    fireEvent.click(screen.getByRole('button', { name: /録音開始/ }));
+    await screen.findByRole('button', { name: /録音停止/ });
+    unmount();
+    await waitFor(() => expect(hasUnsavedDraft()).toBe(true));
+
+    render(<SoundCollection />);
+    expect(await screen.findByLabelText(/音の名前/)).toBeInTheDocument();
+    expect(screen.getByText(/前に録音した音がまだ保存されていません/)).toBeInTheDocument();
+  });
+
+  test('保存前の音があるときに新しく録音する場合は確認し、キャンセルすれば残す', async () => {
+    render(<SoundCollection />);
+    await record();
+    fireEvent.change(screen.getByLabelText(/音の名前/), { target: { value: '残したい音' } });
+    window.confirm = jest.fn(() => false);
+    fireEvent.click(screen.getByRole('button', { name: /録音開始/ }));
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('まだ保存していない音があります'));
+    expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(1);
+    expect(screen.getByLabelText(/音の名前/)).toHaveValue('残したい音');
+  });
+
+  test('保存前の音があるときにファイルを選ぶ場合も確認する', async () => {
+    render(<SoundCollection />);
+    await record();
+    window.confirm = jest.fn(() => false);
+    fireEvent.change(document.querySelector('input[type="file"]'), {
+      target: { files: [new File([makeAudioBytes('wav', 10)], 'other.wav', { type: 'audio/wav' })] }
+    });
+    expect(window.confirm).toHaveBeenCalled();
+    expect(screen.getByLabelText(/音の名前/)).toHaveValue('');
+    expect(URL.revokeObjectURL).not.toHaveBeenCalled();
+  });
+
+  test('キャンセルした音は次に開いたときに戻さない', async () => {
+    const { unmount } = render(<SoundCollection />);
+    await record();
+    fireEvent.click(screen.getByRole('button', { name: /キャンセル/ }));
+    unmount();
+    expect(hasUnsavedDraft()).toBe(false);
   });
 });
 

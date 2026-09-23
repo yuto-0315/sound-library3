@@ -25,7 +25,7 @@ check('range open', parseByteRange('bytes=100-', 1000), [100, 999]);
 check('range suffix', parseByteRange('bytes=-100', 1000), [900, 999]);
 check('range clamp', parseByteRange('bytes=900-5000', 1000), [900, 999]);
 check('range beyond', parseByteRange('bytes=1000-', 1000), false);
-check('range inverted', parseByteRange('bytes=10-5', 1000), false);
+check('range inverted is ignored', parseByteRange('bytes=10-5', 1000), null);
 check('range multi', parseByteRange('bytes=0-1,5-6', 1000), null);
 check('range garbage', parseByteRange('items=0-1', 1000), null);
 echo $fails ? "\n{$fails} 件失敗\n" : "\nすべて成功\n";

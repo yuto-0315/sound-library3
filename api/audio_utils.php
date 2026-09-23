@@ -94,9 +94,12 @@ function parseByteRange($rangeHeader, $fileSize) {
         $end = $fileSize - 1;
     } else {
         $start = (int)$matches[1];
+        if ($matches[2] !== '' && (int)$matches[2] < $start) {
+            return null; // 「bytes=5-2」のような不正な指定は無視して全体を返す（RFC 7233）
+        }
         $end = $matches[2] === '' ? $fileSize - 1 : min((int)$matches[2], $fileSize - 1);
     }
-    if ($start >= $fileSize || $start > $end) {
+    if ($start >= $fileSize) {
         return false;
     }
     return [$start, $end];
@@ -105,6 +108,11 @@ function parseByteRange($rangeHeader, $fileSize) {
 // Safari の <audio> は Range リクエスト（部分取得）に対応していないサーバーの音声を再生しないため、
 // 206 Partial Content で応答できるようにする。
 function sendAudioFile($path, $mimeType, $downloadName) {
+    // サーバー側で圧縮・バッファリングされると Content-Length と Range がずれるので止める
+    @ini_set('zlib.output_compression', '0');
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
     $fileSize = filesize($path);
     $range = parseByteRange($_SERVER['HTTP_RANGE'] ?? null, $fileSize);
 

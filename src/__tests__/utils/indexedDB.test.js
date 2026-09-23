@@ -2,6 +2,9 @@ import {
   addRecording,
   addRecordings,
   addTagToRecording,
+  backupAndClearProjectAutoSave,
+  getProjectAutoSaveBackup,
+  promoteImportedSongToAutoSave,
   clearAllData,
   deleteProjectAutoSave,
   deleteRecording,
@@ -289,7 +292,109 @@ describe('楽曲データと DAW の自動保存', () => {
   });
 });
 
+describe('先生ページからの楽曲の確定とバックアップ', () => {
+  test('渡された楽曲を自動保存にし、それまでの作業内容をバックアップして、渡された楽曲を消す（1 回で）', async () => {
+    await saveProjectAutoSave({ kind: 'mine', timestamp: 1 });
+    await saveSongData({ kind: 'teacher', timestamp: 2 });
+    const before = idb.log.length;
+    await expect(promoteImportedSongToAutoSave()).resolves.toBe(true);
+    expect(idb.log.slice(before).filter((entry) => entry.type === 'commit')).toHaveLength(1);
+    const autoSave = await getProjectAutoSave();
+    expect(autoSave.kind).toBe('teacher');
+    await expect(getProjectAutoSaveBackup()).resolves.toEqual({ kind: 'mine', timestamp: 1 });
+    await expect(getSongData()).resolves.toBeNull();
+  });
+
+  test('確定に失敗したら何も変えない（途中まで書かれた状態にならない）', async () => {
+    await saveProjectAutoSave({ kind: 'mine' });
+    await saveSongData({ kind: 'teacher' });
+    idb.failNextCommit(quotaError());
+    await expect(promoteImportedSongToAutoSave()).rejects.toBeTruthy();
+    await expect(getProjectAutoSave()).resolves.toEqual({ kind: 'mine' });
+    await expect(getSongData()).resolves.toEqual({ kind: 'teacher' });
+    await expect(getProjectAutoSaveBackup()).resolves.toBeNull();
+  });
+
+  test('渡された楽曲が無ければ何もしない', async () => {
+    await saveProjectAutoSave({ kind: 'mine' });
+    await expect(promoteImportedSongToAutoSave()).resolves.toBe(false);
+    await expect(getProjectAutoSave()).resolves.toEqual({ kind: 'mine' });
+  });
+
+  test('リセット用: 自動保存をバックアップに移してから消す', async () => {
+    await saveProjectAutoSave({ kind: 'mine' });
+    await backupAndClearProjectAutoSave();
+    await expect(getProjectAutoSave()).resolves.toBeNull();
+    await expect(getProjectAutoSaveBackup()).resolves.toEqual({ kind: 'mine' });
+  });
+
+  test('自動保存が無いときのリセットではバックアップを上書きしない', async () => {
+    await saveProjectAutoSave({ kind: 'old' });
+    await backupAndClearProjectAutoSave();
+    await backupAndClearProjectAutoSave();
+    await expect(getProjectAutoSaveBackup()).resolves.toEqual({ kind: 'old' });
+  });
+});
+
+describe('同時に実行されたときのデータの守り方', () => {
+  test('移行が同時に 2 回走っても（2 つのタブなど）重複して追加しない', async () => {
+    storage.soundRecordings = JSON.stringify([
+      recording({ name: 'a', createdAt: undefined }),
+      recording({ name: 'b', audioData: makeDataUrl('webm', 'audio/mp4') }) // 表記を直して保存されるもの
+    ]);
+    const [first, second] = await Promise.all([getAllRecordings(), getAllRecordings()]);
+    expect(first).toHaveLength(2);
+    expect(second).toHaveLength(2);
+    expect(idb.dump(DB, 'recordings')).toHaveLength(2);
+  });
+
+  test('移行した後にもう一度同じデータを移行しても重複しない（作成日時が無い古いデータも）', async () => {
+    const legacy = [recording({ name: '日時なし', createdAt: undefined })];
+    await migrateRecordingsFromLocalStorage(legacy);
+    await migrateRecordingsFromLocalStorage(legacy);
+    expect(idb.dump(DB, 'recordings')).toHaveLength(1);
+  });
+
+  test('移行中に別のタブが localStorage に追加した録音は消さない', async () => {
+    const first = recording({ name: '移行する音' });
+    storage.soundRecordings = JSON.stringify([first]);
+    const promise = getAllRecordings();
+    // 移行の途中で、別のタブ（IndexedDB に保存できなかった環境）が追記する
+    storage.soundRecordings = JSON.stringify([first, recording({ name: 'あとから追加', createdAt: '2026-05-05T00:00:00Z' })]);
+    await promise;
+    expect(JSON.parse(storage.soundRecordings).map((r) => r.name)).toEqual(['あとから追加']);
+  });
+
+  test('重なる書き込みは順番に実行され、どちらも失われない', async () => {
+    await Promise.all([
+      addRecording(recording({ name: '1' })),
+      addRecording(recording({ name: '2' })),
+      addRecordings([recording({ name: '3' }), recording({ name: '4' })])
+    ]);
+    expect(idb.dump(DB, 'recordings').map((r) => r.name).sort()).toEqual(['1', '2', '3', '4']);
+  });
+});
+
 describe('データベースを開く処理', () => {
+  test('終わらないトランザクションは 20 秒で打ち切り、エラーにする（自動保存が止まったままにならない）', async () => {
+    await getSongData(); // データベースを作っておく
+    jest.useFakeTimers();
+    try {
+      idb.stallNextTransactions(1);
+      const settled = saveProjectAutoSave({ big: true }).then(() => null, (error) => error);
+      for (let i = 0; i < 5; i++) {
+        await Promise.resolve();
+        jest.advanceTimersByTime(1);
+      }
+      jest.advanceTimersByTime(20001);
+      const error = await settled;
+      expect(error).toBeInstanceOf(Error);
+      expect(error.message).toContain('時間内に終わりませんでした');
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   test('応答が無いまま 10 秒たったらタイムアウトにする', async () => {
     jest.useFakeTimers();
     try {

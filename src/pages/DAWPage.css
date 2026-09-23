@@ -1286,6 +1286,8 @@ body.dragging .tracks-area {
   .sound-item {
     min-width: 200px;
     flex-shrink: 0;
+    /* 狭い画面では音素材が横に並ぶので、横はリストのスクロール、縦（下のタイムラインへ）はドラッグ */
+    touch-action: pan-x;
   }
   
   .daw-workspace {
@@ -1912,9 +1914,14 @@ body.dragging .tracks-area {
   color: #2e5e2e;
 }
 
-.autosave-status-error {
+.autosave-status-error,
+.autosave-status-disabled {
   color: #b00020;
   font-weight: bold;
+}
+
+.retry-load-btn {
+  margin-left: 12px;
 }
 
 .daw-loading {

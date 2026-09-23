@@ -203,9 +203,12 @@
   transition: background 0.2s ease, color 0.2s ease;
 }
 
-.delete-btn:hover {
-  background: rgba(244, 67, 54, 0.1);
-  color: var(--warning-color);
+/* タッチ端末ではタップ後に :hover が残るので、マウスがあるときだけ */
+@media (hover: hover) {
+  .delete-btn:hover {
+    background: rgba(244, 67, 54, 0.1);
+    color: var(--warning-color);
+  }
 }
 
 .sound-meta {

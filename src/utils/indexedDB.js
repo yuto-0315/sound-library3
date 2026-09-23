@@ -8,9 +8,11 @@ const STORE_NAME_RECORDINGS = 'recordings'; // 録音データ用ストア
 
 const IMPORT_SONG_KEY = 'daw-import-song'; // 先生ページから DAW へ渡す楽曲
 const AUTOSAVE_KEY = 'daw-autosave'; // DAW の自動保存
+const AUTOSAVE_BACKUP_KEY = 'daw-autosave-backup'; // 置き換え・リセット前の作業内容（1 つだけ残す）
 const LEGACY_RECORDINGS_KEY = 'soundRecordings'; // 旧バージョンの localStorage キー
 
 const OPEN_TIMEOUT_MS = 10000;
+const TRANSACTION_TIMEOUT_MS = 20000;
 
 // ========== 接続 ==========
 
@@ -116,23 +118,36 @@ const runTransaction = (storeNames, mode, executor) => openDB().then((db) => new
   let result;
   let executorError = null;
   let tx;
+  let settled = false;
+  let timeoutId = null;
+
+  const finish = (callback, value) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timeoutId);
+    db.close();
+    callback(value);
+  };
 
   try {
     tx = db.transaction(storeNames, mode);
   } catch (error) {
-    db.close();
-    reject(error);
+    finish(reject, error);
     return;
   }
 
-  tx.oncomplete = () => {
-    db.close();
-    resolve(result);
-  };
-  tx.onabort = () => {
-    db.close();
-    reject(executorError || tx.error || new Error('データベースの処理が中断されました'));
-  };
+  tx.oncomplete = () => finish(resolve, result);
+  tx.onabort = () => finish(reject, executorError || tx.error || new Error('データベースの処理が中断されました'));
+
+  // WebKit ではまれにトランザクションが終わらないことがある。待ち続けると自動保存が止まったままになるので打ち切る
+  timeoutId = setTimeout(() => {
+    try {
+      tx.abort();
+    } catch (error) {
+      // 既に終了している
+    }
+    finish(reject, new Error('データベースの処理が時間内に終わりませんでした'));
+  }, TRANSACTION_TIMEOUT_MS);
 
   const abort = (error) => {
     executorError = error;
@@ -212,6 +227,44 @@ export const deleteProjectAutoSave = async () => {
   await deleteSongRecord(AUTOSAVE_KEY);
   return true;
 };
+
+// 自動保存を消す前に、1 つ前の作業内容としてバックアップに移す（1 つのトランザクションで行う）
+export const backupAndClearProjectAutoSave = () => runTransaction([STORE_NAME_SONGS], 'readwrite', (tx) => {
+  const store = tx.objectStore(STORE_NAME_SONGS);
+  const request = store.get(AUTOSAVE_KEY);
+  request.onsuccess = () => {
+    if (request.result) {
+      store.put({ ...request.result, id: AUTOSAVE_BACKUP_KEY, backedUpAt: Date.now() });
+      store.delete(AUTOSAVE_KEY);
+    }
+  };
+});
+
+export const getProjectAutoSaveBackup = () => getSongRecord(AUTOSAVE_BACKUP_KEY);
+
+// 先生ページから渡された楽曲を、そのまま新しい自動保存として確定する。
+// 「今の作業内容をバックアップ → 楽曲を自動保存に書く → 渡された楽曲を消す」を 1 つのトランザクションで
+// 行うので、途中でページを離れても楽曲が失われたり、同じ楽曲が何度も読み込まれたりしない。
+export const promoteImportedSongToAutoSave = () => runTransaction([STORE_NAME_SONGS], 'readwrite', (tx, setResult) => {
+  const store = tx.objectStore(STORE_NAME_SONGS);
+  const importRequest = store.get(IMPORT_SONG_KEY);
+  importRequest.onsuccess = () => {
+    const imported = importRequest.result;
+    if (!imported) {
+      setResult(false);
+      return;
+    }
+    const currentRequest = store.get(AUTOSAVE_KEY);
+    currentRequest.onsuccess = () => {
+      if (currentRequest.result) {
+        store.put({ ...currentRequest.result, id: AUTOSAVE_BACKUP_KEY, backedUpAt: Date.now() });
+      }
+      store.put({ id: AUTOSAVE_KEY, data: imported.data, timestamp: Date.now(), importedAt: Date.now() });
+      store.delete(IMPORT_SONG_KEY);
+      setResult(true);
+    };
+  };
+});
 
 // ========== 録音データ ==========
 
@@ -384,42 +437,63 @@ export const migrateFromLocalStorage = async () => {
 };
 
 // 同じ録音かどうかの判定用。名前だけで判定すると「同じ名前の別の録音」が消えてしまうため、
-// 作成日時と音声データの長さも含める。
+// 作成日時と音声データの中身（先頭と長さ）も含める。
+// 移行時に保存する側は MIME 表記や作成日時を補うので、移行前の元データから計算した値を
+// legacyFingerprint として一緒に保存し、それで重複を判定する。
 const recordingFingerprint = (recording) => {
   const time = recording.createdAt ? new Date(recording.createdAt).getTime() : '';
-  const size = recording.audioData ? recording.audioData.length : 0;
-  return `${recording.name}|${time}|${size}`;
+  const audio = recording.audioData || '';
+  const commaIndex = audio.indexOf(',');
+  const body = commaIndex >= 0 ? audio.slice(commaIndex + 1) : audio;
+  return `${recording.name}|${time}|${body.length}|${body.slice(0, 64)}`;
 };
 
 // localStorage からの移行ヘルパー (録音データ)。
-// すべて 1 つのトランザクションで追加し、完了を確認してから localStorage を消す。
+// すべて 1 つのトランザクションで追加し、完了を確認してから、移行した分だけ localStorage から消す。
 export const migrateRecordingsFromLocalStorage = async (recordings) => {
-  const migratedCount = await runTransaction([STORE_NAME_RECORDINGS], 'readwrite', (tx, setResult) => {
+  const migrated = await runTransaction([STORE_NAME_RECORDINGS], 'readwrite', (tx, setResult) => {
     const store = tx.objectStore(STORE_NAME_RECORDINGS);
     const getAllRequest = store.getAll();
     getAllRequest.onsuccess = () => {
-      const existing = new Set((getAllRequest.result || []).map(recordingFingerprint));
+      const existing = new Set();
+      (getAllRequest.result || []).forEach((stored) => {
+        if (stored.legacyFingerprint) existing.add(stored.legacyFingerprint);
+        existing.add(recordingFingerprint(stored));
+      });
+      const handled = new Set();
       let count = 0;
       recordings.forEach((recording) => {
-        if (!recording || existing.has(recordingFingerprint(recording))) return;
-        existing.add(recordingFingerprint(recording));
+        if (!recording) return;
+        const fingerprint = recordingFingerprint(recording);
+        handled.add(fingerprint);
+        if (existing.has(fingerprint)) return;
+        existing.add(fingerprint);
         const { id, ...data } = toStoredRecording({
           ...recording,
-          source: recording.source || 'localStorage-migration'
+          source: recording.source || 'localStorage-migration',
+          legacyFingerprint: fingerprint
         });
         store.add(data);
         count++;
       });
-      setResult(count);
+      setResult({ count, handled });
     };
   });
 
-  // ここに来た時点で全件の保存が確定している（重複分は既に IndexedDB にある）
-  localStorage.removeItem(LEGACY_RECORDINGS_KEY);
-  if (migratedCount > 0) {
-    console.log(`✓ ${migratedCount}件の録音をlocalStorageからIndexedDBに移行しました`);
+  // ここに来た時点で全件の保存が確定している（重複分は既に IndexedDB にある）。
+  // 移行中に別のタブが追加した分は消さずに残す。
+  const remaining = readLegacyRecordings().filter(
+    (recording) => recording && !migrated.handled.has(recordingFingerprint(recording))
+  );
+  if (remaining.length > 0) {
+    localStorage.setItem(LEGACY_RECORDINGS_KEY, JSON.stringify(remaining));
+  } else {
+    localStorage.removeItem(LEGACY_RECORDINGS_KEY);
   }
-  return migratedCount;
+  if (migrated.count > 0) {
+    console.log(`✓ ${migrated.count}件の録音をlocalStorageからIndexedDBに移行しました`);
+  }
+  return migrated.count;
 };
 
 // すべてのデータをクリア (デバッグ用)

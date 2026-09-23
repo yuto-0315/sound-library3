@@ -10,11 +10,14 @@ import SoundCollection from '../pages/SoundCollection';
 import { installFakeIndexedDB } from '../test-utils/fakeIndexedDB';
 import { installMemoryLocalStorage } from '../test-utils/storage';
 import { TestFileReader, makeAudioBytes } from '../test-utils/audioFixtures';
+import { takeUnsavedDraft } from '../utils/unsavedDraft';
 
 describe('SoundCollection Component', () => {
   beforeEach(() => {
+    takeUnsavedDraft(); // 前のテストで残った「保存前の録音」を捨てる
     installFakeIndexedDB();
     installMemoryLocalStorage();
+    window.confirm = jest.fn(() => true);
     global.FileReader = TestFileReader;
     URL.createObjectURL.mockImplementation(() => 'blob:mock-url');
     jest.spyOn(console, 'error').mockImplementation(() => {});

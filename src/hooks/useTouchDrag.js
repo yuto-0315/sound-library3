@@ -92,6 +92,8 @@ export const useTouchDrag = ({ onStart, onMove, onEnd, onCancel, shouldStart, th
     };
 
     const handleTouchStart = (event) => {
+      // ドラッグ中に 2 本目の指が触れても、ドラッグはそのまま続ける（途中半端な状態にしない）
+      if (state.dragging) return;
       const target = event.target;
       if (event.touches.length !== 1 || (target && target.closest && target.closest('button, input, select, textarea, a'))) {
         state.tracking = false;

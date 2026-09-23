@@ -5,6 +5,7 @@ import {
   addRecording,
   getAllRecordings,
   getProjectAutoSave,
+  getProjectAutoSaveBackup,
   getSongData,
   saveProjectAutoSave,
   saveSongData
@@ -213,6 +214,117 @@ describe('自動保存と復元（ページ移動でタイムラインが消え�
   });
 });
 
+describe('読み込みに失敗したとき（レビューで見つかったデータ消失の対策）', () => {
+  const failFirstSongsRead = () => idb.failNextCommit(
+    new Error('Connection to Indexed Database server lost'),
+    (tx) => tx.mode === 'readonly' && tx.storeNames.includes('songs')
+  );
+
+  test('「自動保存停止中」を閉じられない形で表示し、「もう一度読み込む」で読み込み直せる', async () => {
+    await saveProjectAutoSave(projectWithClips());
+    failFirstSongsRead();
+    const { container } = await renderDAW();
+    expect(screen.getByText('自動保存停止中')).toBeInTheDocument();
+    // エラーの帯を閉じても、停止中の表示は残る
+    fireEvent.click(screen.getByRole('button', { name: 'メッセージを閉じる' }));
+    expect(screen.getByText('自動保存停止中')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /もう一度読み込む/ }));
+    await waitFor(() => expect(getClipNames(container)).toEqual(['たいこ', 'すず']));
+    expect(screen.queryByText('自動保存停止中')).not.toBeInTheDocument();
+    // 読み込めたので自動保存も再開する
+    fireEvent.click(screen.getByRole('button', { name: /トラック追加/ }));
+    await waitForAutoSaveCompleted();
+    expect((await getProjectAutoSave()).tracks).toHaveLength(3);
+  });
+
+  test('読み込めない状態でリセットしても、保存データはバックアップに残る', async () => {
+    const original = projectWithClips();
+    await saveProjectAutoSave(original);
+    failFirstSongsRead();
+    await renderDAW();
+    fireEvent.click(screen.getByRole('button', { name: /リセット/ }));
+    await waitFor(() => expect(window.alert).toHaveBeenCalledWith('プロジェクトをリセットしました'));
+    const backup = await getProjectAutoSaveBackup();
+    expect(backup.tracks[0].clips).toHaveLength(2);
+  });
+
+  test('バックアップもできないときはリセットを中止して、保存データを消さない', async () => {
+    await saveProjectAutoSave(projectWithClips());
+    failFirstSongsRead();
+    await renderDAW();
+    idb.failNextCommit(new Error('still broken'), (tx) => tx.mode === 'readwrite');
+    fireEvent.click(screen.getByRole('button', { name: /リセット/ }));
+    expect(await screen.findByText(/リセットを中止しました/)).toBeInTheDocument();
+    expect(window.alert).not.toHaveBeenCalled();
+    expect((await getProjectAutoSave()).tracks[0].clips).toHaveLength(2);
+    expect(screen.getByText('自動保存停止中')).toBeInTheDocument();
+  });
+
+  test('音素材の読み込みに失敗したときも、作業内容を空で上書きしない', async () => {
+    await saveProjectAutoSave(projectWithClips());
+    idb.failNextCommit(new Error('lost'), (tx) => tx.mode === 'readonly' && tx.storeNames.includes('recordings'));
+    await renderDAW();
+    expect(screen.getByText('自動保存停止中')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /トラック追加/ }));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 800)));
+    expect((await getProjectAutoSave()).tracks[0].clips).toHaveLength(2);
+  });
+});
+
+describe('自動保存の再試行と別のタブ', () => {
+  test('自動保存に失敗したあと何も操作せずにページを離れても、もう一度保存する', async () => {
+    const { unmount } = await renderDAW();
+    idb.failNextCommit(new Error('write failed once'), (tx) => tx.mode === 'readwrite');
+    fireEvent.click(screen.getByRole('button', { name: /トラック追加/ }));
+    expect(await screen.findByText('自動保存に失敗', {}, { timeout: 3000 })).toBeInTheDocument();
+    unmount();
+    await waitFor(async () => {
+      const saved = await getProjectAutoSave();
+      expect(saved && saved.tracks).toHaveLength(2);
+    });
+  });
+
+  test('別のタブで保存された新しい作業内容は、このタブに戻ったときに読み込み直す（古い内容で上書きしない）', async () => {
+    await saveProjectAutoSave(projectWithClips());
+    const { container } = await renderDAW();
+    await waitFor(() => expect(getClipNames(container)).toHaveLength(2));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 700))); // 読み込み直後の保存を終わらせる
+
+    // 別のタブが新しい内容を保存した
+    const newer = serializeProject({
+      tracks: [{ id: 7, name: 'トラック 1', clips: [{ id: 3, startTime: 0, duration: 100, trackId: 7, soundData: { name: '別のタブの音', audioData: bellAudio } }] }],
+      pixelsPerSecond: 100
+    });
+    newer.timestamp = Date.now() + 1000;
+    await saveProjectAutoSave(newer);
+
+    Object.defineProperty(document, 'hidden', { value: false, configurable: true });
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await waitFor(() => expect(getClipNames(container)).toEqual(['別のタブの音']));
+    // 読み込み直しただけなので、保存し直して時刻を進めない
+    await act(() => new Promise((resolve) => setTimeout(resolve, 700)));
+    expect((await getProjectAutoSave()).timestamp).toBe(newer.timestamp);
+  });
+
+  test('このタブに保存待ちの変更があるときは、別のタブの内容で置き換えない', async () => {
+    await saveProjectAutoSave(projectWithClips());
+    const { container } = await renderDAW();
+    await waitFor(() => expect(getClipNames(container)).toHaveLength(2));
+    const newer = serializeProject({ tracks: [{ id: 7, name: 'x', clips: [] }], pixelsPerSecond: 100 });
+    newer.timestamp = Date.now() + 1000;
+    await saveProjectAutoSave(newer);
+    fireEvent.click(screen.getByRole('button', { name: /トラック追加/ })); // 保存待ちの変更
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    expect(getClipNames(container)).toEqual(['たいこ', 'すず']);
+  });
+});
+
 describe('読み込み中の操作', () => {
   test('前回の作業内容を読み込んでいる間は操作できないようにする（置いたクリップが上書きで消えるのを防ぐ）', async () => {
     await saveProjectAutoSave(projectWithClips());
@@ -228,6 +340,42 @@ describe('読み込み中の操作', () => {
     expect(container.querySelector('.daw-controls')).not.toHaveAttribute('inert');
     expect(container.querySelector('.daw-main-area')).not.toHaveClass('is-loading');
     expect(container.querySelector('.daw-main-area')).toHaveAttribute('aria-busy', 'false');
+  });
+});
+
+describe('先生ページからの楽曲インポート（今の作業内容の扱い）', () => {
+  const teacherSong = () => serializeProject({
+    tracks: [{ id: 1, name: 'トラック 1', clips: [{ id: 1, startTime: 0, duration: 100, trackId: 1, soundData: { name: '先生の曲の音', audioData: makeDataUrl('ogg', 'audio/ogg', 40) } }] }],
+    pixelsPerSecond: 100
+  });
+
+  test('今の作業内容があるときは確認し、開く場合は作業内容をバックアップする', async () => {
+    await saveProjectAutoSave(projectWithClips());
+    await saveSongData(teacherSong());
+    const { container } = await renderDAW();
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('今の作業内容はこの楽曲に置き換わります'));
+    await waitFor(() => expect(getClipNames(container)).toEqual(['先生の曲の音']));
+    const backup = await getProjectAutoSaveBackup();
+    expect(backup.tracks[0].clips.map((clip) => clip.soundData.name)).toEqual(['たいこ', 'すず']);
+    await expect(getSongData()).resolves.toBeNull();
+    expect((await getProjectAutoSave()).tracks[0].clips[0].soundData.name).toBe('先生の曲の音');
+  });
+
+  test('確認でキャンセルしたら今の作業内容を続け、渡された楽曲は捨てる', async () => {
+    window.confirm = jest.fn(() => false);
+    await saveProjectAutoSave(projectWithClips());
+    await saveSongData(teacherSong());
+    const { container } = await renderDAW();
+    await waitFor(() => expect(getClipNames(container)).toEqual(['たいこ', 'すず']));
+    await expect(getSongData()).resolves.toBeNull();
+    expect(window.alert).not.toHaveBeenCalled();
+  });
+
+  test('今の作業内容が空なら確認せずに開く', async () => {
+    await saveSongData(teacherSong());
+    const { container } = await renderDAW();
+    await waitFor(() => expect(getClipNames(container)).toEqual(['先生の曲の音']));
+    expect(window.confirm).not.toHaveBeenCalled();
   });
 });
 

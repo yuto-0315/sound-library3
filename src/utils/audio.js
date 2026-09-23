@@ -407,8 +407,17 @@ export const encodeWav = (channels, sampleRate) => {
   return new Blob([buffer], { type: 'audio/wav' });
 };
 
-// iOS Safari は click 直後に Object URL を解放するとダウンロードが失敗するので少し待つ
+export const isDownloadSupported = () =>
+  typeof document !== 'undefined' && 'download' in document.createElement('a');
+
+// iOS Safari は click 直後に Object URL を解放するとダウンロードが失敗するので少し待つ。
+// iPadOS 12 以前は download 属性に対応しておらず、アプリのページから移動してしまうので保存させない。
 export const downloadBlob = (blob, fileName) => {
+  if (!isDownloadSupported()) {
+    const error = new Error('この端末のブラウザはファイルの保存に対応していません（iPad は iPadOS 13 以降が必要です）。');
+    error.code = 'DOWNLOAD_UNSUPPORTED';
+    throw error;
+  }
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;

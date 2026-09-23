@@ -11,8 +11,11 @@ import {
   withDetectedMimeType
 } from '../utils/audio';
 import { isEnterKey } from '../utils/keyboard';
+import { keepUnsavedDraft, takeUnsavedDraft } from '../utils/unsavedDraft';
 
 const LEGACY_RECORDINGS_KEY = 'soundRecordings';
+
+const DISCARD_CONFIRM_MESSAGE = 'まだ保存していない音があります。\n新しい音にすると、この音は消えます。よろしいですか？';
 
 const stopStream = (stream) => {
   if (!stream) return;
@@ -53,6 +56,7 @@ const SoundCollection = () => {
   const [isRecording, setIsRecording] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [currentRecording, setCurrentRecording] = useState(null);
+  const [isDraftRestored, setIsDraftRestored] = useState(false);
   const fileInputRef = useRef(null);
   const recordButtonRef = useRef(null);
 
@@ -63,6 +67,9 @@ const SoundCollection = () => {
   const isMountedRef = useRef(true);
   const objectUrlsRef = useRef(new Set());
   const savingUrlRef = useRef(null); // 保存中の音の URL（解放しない）
+  const savedUrlsRef = useRef(new Set()); // 「最近録音した音」で使っている URL（解放しない）
+  const currentRecordingRef = useRef(currentRecording);
+  currentRecordingRef.current = currentRecording;
 
   // アクセシビリティフック
   const { announce, AnnouncementRegion } = useAnnouncement();
@@ -73,8 +80,28 @@ const SoundCollection = () => {
   useEffect(() => {
     isMountedRef.current = true;
     const objectUrls = objectUrlsRef.current;
+    const savedUrls = savedUrlsRef.current;
+
+    // 前にこのページを離れたときの、保存していない音を戻す
+    const draft = takeUnsavedDraft();
+    if (draft) {
+      const url = URL.createObjectURL(draft.audioBlob);
+      objectUrls.add(url);
+      setCurrentRecording({ ...draft, url });
+      setIsDraftRestored(true);
+    }
+
     return () => {
       isMountedRef.current = false;
+      const unsaved = currentRecordingRef.current;
+      if (unsaved && unsaved.audioBlob && unsaved.url !== savingUrlRef.current && !savedUrls.has(unsaved.url)) {
+        keepUnsavedDraft({
+          audioBlob: unsaved.audioBlob,
+          name: unsaved.name || '',
+          tags: unsaved.tags || [],
+          createdAt: unsaved.createdAt
+        });
+      }
       const recorder = mediaRecorderRef.current;
       mediaRecorderRef.current = null;
       if (recorder && recorder.state !== 'inactive') {
@@ -104,10 +131,20 @@ const SoundCollection = () => {
     }
   };
 
+  // 保存していない音を捨ててよいか確認する（保存中の音は一覧に残るので確認しない）
+  const confirmDiscardUnsaved = () => {
+    const current = currentRecordingRef.current;
+    if (!current || current.url === savingUrlRef.current) return true;
+    return window.confirm(DISCARD_CONFIRM_MESSAGE);
+  };
+
   // 編集中の音を差し替える（保存しなかった前の音の URL は解放する。保存中の音は一覧で使うので残す）
+  // （setState の更新関数は次の描画のときに実行されるので、その時点の保存状況で判定する）
   const replaceCurrentRecording = (next) => {
+    setIsDraftRestored(false);
     setCurrentRecording(prev => {
-      if (prev && prev.url && (!next || prev.url !== next.url) && prev.url !== savingUrlRef.current) {
+      const isInUse = prev && (prev.url === savingUrlRef.current || savedUrlsRef.current.has(prev.url));
+      if (prev && prev.url && (!next || prev.url !== next.url) && !isInUse) {
         releaseObjectUrl(prev.url);
       }
       return next;
@@ -120,7 +157,7 @@ const SoundCollection = () => {
       return '録音機能を使用するにはHTTPS接続（https:// で始まるアドレス）が必要です。';
     }
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof MediaRecorder === 'undefined') {
-      return 'お使いのブラウザは録音機能をサポートしていません。iPadの場合は iPadOS 14.3 以降の Safari をお使いください。';
+      return 'お使いのブラウザは録音機能をサポートしていません。iPadの場合は iPadOS 14.5 以降の Safari をお使いください。';
     }
     if (navigator.permissions && navigator.permissions.query) {
       try {
@@ -143,6 +180,7 @@ const SoundCollection = () => {
   const startRecording = async () => {
     // 連打で録音が二重に始まらないようにする
     if (isStartingRef.current || mediaRecorderRef.current) return;
+    if (!confirmDiscardUnsaved()) return;
     isStartingRef.current = true;
 
     try {
@@ -203,13 +241,21 @@ const SoundCollection = () => {
         stopStream(stream);
         if (streamRef.current === stream) streamRef.current = null;
         if (mediaRecorderRef.current === recorder) mediaRecorderRef.current = null;
-        if (!isMountedRef.current) return;
-        // マイクが切断されたなどで自動的に止まった場合も「録音中」の表示を戻す
-        setIsRecording(false);
 
         // 実際の録音形式で Blob を作る（常に audio/wav と表記すると iPad で再生できなくなる）
         const type = recorder.mimeType || (chunks[0] && chunks[0].type) || mimeType || 'audio/mp4';
         const blob = new Blob(chunks, { type });
+
+        if (!isMountedRef.current) {
+          // 録音中にほかのページへ移動した: 戻ってきたときに保存できるよう覚えておく
+          if (blob.size > 0) {
+            keepUnsavedDraft({ audioBlob: blob, name: '', tags: [], createdAt: new Date().toISOString() });
+          }
+          return;
+        }
+        // マイクが切断されたなどで自動的に止まった場合も「録音中」の表示を戻す
+        setIsRecording(false);
+
         if (blob.size === 0) {
           reportError('録音データが空でした。もう一度録音してください。');
           return;
@@ -302,10 +348,12 @@ const SoundCollection = () => {
 
       // 保存が確定してから一覧に出す（保存できていないのに保存済みに見えるのを防ぐ）
       requestPersistentStorage();
+      savedUrlsRef.current.add(target.url);
       if (!isMountedRef.current) return;
       setRecordings(prev => [...prev, { ...record, id, url: target.url }]);
       // 保存中に次の録音が始まって編集中の音が変わっていたら、そちらは残す
       setCurrentRecording(prev => (prev && prev.url === target.url ? null : prev));
+      setIsDraftRestored(false);
       announce(`「${record.name}」を保存しました。`, 'polite');
     } catch (error) {
       console.error('録音の保存に失敗しました:', error);
@@ -330,6 +378,7 @@ const SoundCollection = () => {
       reportError('音声ファイルを選択してください。対応形式: MP3, WAV, M4A など');
       return;
     }
+    if (!confirmDiscardUnsaved()) return;
     clearError();
 
     let blob = file;
@@ -459,6 +508,7 @@ const SoundCollection = () => {
       {currentRecording && (
         <RecordingEditor 
           key={currentRecording.url}
+          isDraftRestored={isDraftRestored}
           recording={currentRecording}
           onSave={saveRecording}
           onCancel={() => replaceCurrentRecording(null)}
@@ -492,7 +542,7 @@ const SoundCollection = () => {
   );
 };
 
-const RecordingEditor = ({ recording, onSave, onCancel, isSaving = false }) => {
+const RecordingEditor = ({ recording, onSave, onCancel, isSaving = false, isDraftRestored = false }) => {
   const [name, setName] = useState(recording.name);
   const [tagInput, setTagInput] = useState('');
   const [tags, setTags] = useState(recording.tags);
@@ -541,6 +591,11 @@ const RecordingEditor = ({ recording, onSave, onCancel, isSaving = false }) => {
       <p id="editor-description" className="sr-only">
         録音した音に名前とタグをつけて保存できます
       </p>
+      {isDraftRestored && (
+        <p className="draft-restored-notice" role="status">
+          前に録音した音がまだ保存されていません。名前をつけて保存してください。
+        </p>
+      )}
       
       <div className="audio-preview-container">
         <label htmlFor="audio-preview" className="audio-preview-label">録音した音のプレビュー:</label>

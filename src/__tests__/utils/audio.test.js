@@ -8,6 +8,7 @@ import {
   decodeAudioData,
   detectAudioMimeType,
   disableSilentModePlayback,
+  downloadBlob,
   enableSilentModePlayback,
   encodeWav,
   getAudioDataUrlMimeType,
@@ -395,6 +396,38 @@ describe('iOS 判定と消音モード対策', () => {
     expect(audio.src.startsWith('data:audio/wav;base64,')).toBe(true);
     expect(detectAudioMimeType(base64ToBytes(audio.src.split(',')[1]))).toBe('audio/wav');
     expect(() => primeAudioElement(null)).not.toThrow();
+  });
+});
+
+describe('downloadBlob（ファイルの保存）', () => {
+  test('リンクをクリックし、すぐには URL を解放しない（iOS で保存が失敗するため）', () => {
+    jest.useFakeTimers();
+    try {
+      URL.createObjectURL.mockImplementation(() => 'blob:download');
+      const click = jest.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+      downloadBlob(new Blob(['x']), 'song.json');
+      expect(click).toHaveBeenCalled();
+      expect(URL.revokeObjectURL).not.toHaveBeenCalled();
+      jest.advanceTimersByTime(30000);
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:download');
+      expect(document.querySelector('a[download]')).toBeNull();
+      click.mockRestore();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  test('download 属性に対応していないブラウザ（iPadOS 12）ではページを移動せずにエラーにする', () => {
+    const descriptor = Object.getOwnPropertyDescriptor(HTMLAnchorElement.prototype, 'download');
+    delete HTMLAnchorElement.prototype.download;
+    try {
+      const click = jest.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+      expect(() => downloadBlob(new Blob(['x']), 'a.wav')).toThrow('iPadOS 13 以降');
+      expect(click).not.toHaveBeenCalled();
+      click.mockRestore();
+    } finally {
+      Object.defineProperty(HTMLAnchorElement.prototype, 'download', descriptor);
+    }
   });
 });
 

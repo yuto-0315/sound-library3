@@ -2,6 +2,7 @@
 // src/utils/indexedDB.js が使う機能（open / upgrade / transaction / get / put / add / delete /
 // getAll / clear / index.getAll）だけを、実物と同じ非同期のタイミングで再現する。
 // トランザクションは complete まで反映されず、abort すると変更が捨てられる。
+// 範囲が重なる書き込みトランザクションは、本物と同じく作られた順に 1 つずつ実行する。
 
 const clone = (value) => {
   if (value === null || typeof value !== 'object') return value;
@@ -171,13 +172,38 @@ class FakeTransaction {
     this.finished = false;
     this.pending = 0;
     this.changes = [];
+    this.waiting = [];
+    this.started = false;
+    this.stalled = factory.takeStall();
+    this.done = new Promise((resolve) => { this.resolveDone = resolve; });
+
+    // 本物と同じく、範囲が重なるトランザクションのうち書き込みを含むものは作られた順に 1 つずつ実行する
+    const blockers = factory.activeTransactions.filter((other) =>
+      other.storeNames.some((name) => storeNames.includes(name)) &&
+      (other.mode === 'readwrite' || mode === 'readwrite'));
+    factory.activeTransactions.push(this);
+    Promise.all(blockers.map((other) => other.done)).then(() => this.start());
+  }
+
+  start() {
+    if (this.finished) return;
     // 変更は作業用コピーに対して行い、complete 時に反映する
     this.working = {};
-    storeNames.forEach((name) => {
-      const source = db.backend.stores[name];
+    this.storeNames.forEach((name) => {
+      const source = this.db.backend.stores[name];
       this.working[name] = { records: new Map(Array.from(source.records.entries()).map(([k, v]) => [k, clone(v)])), nextKey: source.nextKey };
     });
+    this.started = true;
+    if (this.stalled) return; // 応答しないトランザクションの再現
+    const waiting = this.waiting;
+    this.waiting = [];
+    waiting.forEach((run) => later(run));
     this.scheduleCommitCheck();
+  }
+
+  release() {
+    this.factory.activeTransactions = this.factory.activeTransactions.filter((tx) => tx !== this);
+    this.resolveDone();
   }
 
   objectStore(name) {
@@ -200,7 +226,7 @@ class FakeTransaction {
     if (this.finished) throw createDomError('TransactionInactiveError', 'Transaction has finished');
     const request = new FakeRequest(source, this);
     this.pending++;
-    later(() => {
+    const run = () => {
       if (this.finished) return;
       try {
         request.result = operation();
@@ -221,13 +247,18 @@ class FakeTransaction {
       }
       this.pending--;
       this.scheduleCommitCheck();
-    });
+    };
+    if (this.started && !this.stalled) {
+      later(run);
+    } else {
+      this.waiting.push(run);
+    }
     return request;
   }
 
   scheduleCommitCheck() {
     later(() => {
-      if (this.finished || this.pending > 0) return;
+      if (this.finished || !this.started || this.stalled || this.pending > 0) return;
       this.commit();
     });
   }
@@ -253,6 +284,7 @@ class FakeTransaction {
       store.nextKey = Math.max(store.nextKey, this.working[name].nextKey);
     });
     this.factory.log.push({ type: 'commit', mode: this.mode, stores: this.storeNames });
+    this.release();
     if (this.oncomplete) this.oncomplete({ target: this });
   }
 
@@ -261,6 +293,7 @@ class FakeTransaction {
     this.finished = true;
     this.error = error;
     this.factory.log.push({ type: 'abort', mode: this.mode, stores: this.storeNames, error });
+    this.release();
     later(() => {
       if (this.onabort) this.onabort({ target: this });
     });
@@ -322,8 +355,19 @@ export const createFakeIndexedDB = () => {
     transactionCount: 0,
     openConnections: new Set(),
     commitFailures: [],
+    activeTransactions: [],
+    stallCount: 0,
     openFailure: null,
     openDelayMs: 0,
+    // 次の count 個のトランザクションを、いつまでも終わらない状態にする（WebKit の不具合の再現）
+    stallNextTransactions(count = 1) {
+      factory.stallCount += count;
+    },
+    takeStall() {
+      if (factory.stallCount <= 0) return false;
+      factory.stallCount -= 1;
+      return true;
+    },
     // 次のトランザクションの commit を失敗させる（容量不足などの再現）
     failNextCommit(error, predicate = () => true) {
       factory.commitFailures.push({ error, predicate });

@@ -233,13 +233,26 @@ const AdminPage = () => {
 
   // 楽曲再現(DAWページで開く)
   const openSongInDAW = async (song) => {
+    // iPad の Safari は、タップ直後以外の window.open をポップアップとしてブロックする。
+    // データの取得を待つ前に空のタブを開いておき、準備ができたらそのタブで DAW を表示する。
+    const dawUrl = `${window.location.origin}${window.location.pathname}${window.location.search}#/daw`;
+    let newWindow = null;
+    try {
+      newWindow = window.open('', '_blank');
+      if (newWindow && newWindow.document) {
+        newWindow.document.title = '読み込み中...';
+        newWindow.document.body.textContent = '楽曲を読み込んでいます...';
+      }
+    } catch (openError) {
+      newWindow = null;
+    }
+
     try {
       // song_dataが省略されている場合は、個別に取得
       let songData = song.song_data;
       
       if (song.data_omitted || !songData) {
-        console.log('楽曲データを個別取得します...');
-        const response = await fetch(`${API_BASE_URL}/songs.php?uid=${song.uid}`);
+        const response = await fetch(`${API_BASE_URL}/songs.php?uid=${encodeURIComponent(song.uid)}`);
         
         if (!response.ok) {
           throw new Error(`楽曲データの取得に失敗しました (HTTP ${response.status})`);
@@ -253,22 +266,24 @@ const AdminPage = () => {
         
         songData = result.data.song_data;
       }
+
+      if (!songData || !Array.isArray(songData.tracks)) {
+        throw new Error('楽曲データが壊れています');
+      }
       
-      // 楽曲データのサイズを確認
-      const songDataStr = JSON.stringify(songData);
-      const sizeInMB = new Blob([songDataStr]).size / 1024 / 1024;
-      console.log(`Song data size: ${sizeInMB.toFixed(2)} MB`);
-      
-      // IndexedDBに保存
+      // IndexedDBに保存（DAW ページが開いたときに読み込む）
       await saveSongData(songData);
-      console.log('✓ Song data saved to IndexedDB');
-      
-      // DAWページを新しいタブで開く
-      window.open('#/daw', '_blank');
+
+      if (newWindow && !newWindow.closed) {
+        newWindow.location.href = dawUrl;
+      } else {
+        // タブを開けなかった場合は、このタブで DAW を開く
+        window.location.href = dawUrl;
+      }
     } catch (error) {
       console.error('Failed to save song data:', error);
+      if (newWindow && !newWindow.closed) newWindow.close();
       alert('楽曲データの保存に失敗しました。\n' +
-            'ブラウザがIndexedDBをサポートしているか確認してください。\n' +
             'エラー: ' + error.message);
     }
   };
@@ -416,9 +431,9 @@ const AdminPage = () => {
                       <span>アップロード日: {new Date(audioFile.upload_date).toLocaleDateString('ja-JP')}</span>
                     </div>
                     
-                    {audioFile.tags.length > 0 && (
+                    {(audioFile.tags || []).length > 0 && (
                       <div className="tags">
-                        {audioFile.tags.map(tag => (
+                        {(audioFile.tags || []).map(tag => (
                           <span key={tag} className="tag">{tag}</span>
                         ))}
                       </div>
@@ -426,7 +441,8 @@ const AdminPage = () => {
                   </div>
                   
                   <div className="audio-actions">
-                    <audio controls src={`/api/download.php?uid=${audioFile.uid}`}>
+                    {/* preload="none": 一覧を開いただけで全ファイルをダウンロードし、ダウンロード数が増えてしまうのを防ぐ */}
+                    <audio controls preload="none" src={`${API_BASE_URL}/download.php?uid=${encodeURIComponent(audioFile.uid)}&user_id=teacher-admin`}>
                       <track kind="captions" label="音声キャプション" />
                       お使いのブラウザは音声の再生に対応していません
                     </audio>

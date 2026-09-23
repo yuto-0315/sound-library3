@@ -58,6 +58,9 @@ const createInitialTracks = () => [{
 
 const sameId = (a, b) => String(a) === String(b);
 
+// 座標が取れなかった場合（一部のブラウザのドラッグイベントなど）に NaN の位置にしない
+const toPosition = (value) => (typeof value === 'number' && isFinite(value) ? value : 0);
+
 const isPlayableSound = (sound) =>
   !!(sound && sound.audioBlob instanceof Blob && sound.audioBlob.size > 0);
 
@@ -784,7 +787,7 @@ const DAWPage = () => {
     if (!isMountedRef.current) return;
     setTracks((prev) => prev.map((track) => {
       if (!sameId(track.id, trackId)) return track;
-      const snapped = Math.max(0, snapPosition(timePosition));
+      const snapped = Math.max(0, snapPosition(toPosition(timePosition)));
       const startTime = findNonOverlappingPosition(track.clips, snapped, width, null, snapPosition);
       return {
         ...track,
@@ -804,7 +807,7 @@ const DAWPage = () => {
     setTracks((prev) => {
       const target = prev.find((track) => sameId(track.id, targetTrackId));
       if (!target) return prev;
-      const snapped = Math.max(0, snapPosition(rawStartTime));
+      const snapped = Math.max(0, snapPosition(toPosition(rawStartTime)));
       const startTime = findNonOverlappingPosition(target.clips, snapped, clip.duration, clip.id, snapPosition);
       const { originalTrackId, ...clipData } = clip;
       const moved = { ...clipData, startTime, trackId: target.id };
@@ -877,7 +880,7 @@ const DAWPage = () => {
     }
     const trackRect = trackElement.getBoundingClientRect();
     const tracksAreaRect = timelineRef.current.getBoundingClientRect();
-    const left = Math.max(0, snapPosition(clientX - trackRect.left - offset));
+    const left = Math.max(0, snapPosition(toPosition(clientX - trackRect.left - offset)));
     highlightTrack(trackElement);
     setDragPreview({
       left,
@@ -963,7 +966,7 @@ const DAWPage = () => {
   const handleClipDragStart = (clip, originalTrackId, mouseX, clipElement) => {
     const clipRect = clipElement.getBoundingClientRect();
     draggedClipRef.current = { ...clip, originalTrackId };
-    dragOffsetRef.current = mouseX - clipRect.left;
+    dragOffsetRef.current = toPosition(mouseX - clipRect.left);
   };
 
   // ドラッグ終了時のクリーンアップ

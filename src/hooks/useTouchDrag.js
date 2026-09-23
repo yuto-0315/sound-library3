@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useLayoutEffect, useRef } from 'react';
 
 // ========== ドラッグ中の画面制御 ==========
 
@@ -80,7 +80,8 @@ export const useTouchDrag = ({ onStart, onMove, onEnd, onCancel, shouldStart, th
   const handlersRef = useRef(null);
   handlersRef.current = { onStart, onMove, onEnd, onCancel, shouldStart };
 
-  useEffect(() => {
+  // 描画と同時にリスナーを付ける（useEffect だと、表示されてから付くまでの間のタッチを取りこぼす）
+  useLayoutEffect(() => {
     const element = elementRef.current;
     if (!element) return undefined;
 

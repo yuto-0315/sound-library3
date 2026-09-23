@@ -1,5 +1,11 @@
 // サーバー API 呼び出しの共通処理
 
+// API の置き場所。本番（https://sound-library.redosila.com）はドメイン直下の api/ に置いている。
+// 以前はページごとに '/api' と '../api' が混ざっていたので、ここで 1 つにまとめる。
+// 別の場所に置くときはビルド時に指定する（例: REACT_APP_API_BASE_URL=https://example.com/sound-library3/api npm run build）。
+// 開発サーバー（npm start）では src/setupProxy.js が /api を XAMPP に中継する。
+export const API_BASE_URL = (process.env.REACT_APP_API_BASE_URL || '/api').replace(/\/+$/, '');
+
 // PHP の警告などで JSON 以外が返ってきても、分かりやすいエラーにする
 export const fetchJson = async (url, options) => {
   const response = await fetch(url, options);

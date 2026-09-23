@@ -98,6 +98,20 @@ chmod 755 api/uploads/audio
 - アップロードディレクトリの権限設定を確認
 - PHPからファイル書き込みができるか確認
 
+### 5.3 開発サーバー（`npm start`）から API を使う
+アプリは API を `/api` に問い合わせます（`src/utils/api.js` の `API_BASE_URL`）。
+開発サーバー（`http://localhost:3000`）では `src/setupProxy.js` が `/api` へのアクセスを XAMPP に中継するので、
+XAMPP を起動しておけばクラウド機能（みんなで共有・クラウド保存・先生用ページ）もそのまま試せます。
+
+- 既定の中継先：`http://localhost/sound-library3/api`（4.1 の手順どおりに置いた場所）
+- 別の場所の API を使うとき：
+
+```bash
+API_PROXY_TARGET=http://localhost:8080/api npm start
+```
+
+中継がうまくいかないときは、ブラウザで `http://localhost:3000/api/rooms.php` を開いて JSON が返るか確認してください。
+
 ## 6. 本番環境での運用
 
 ### 6.1 データベースの設定変更
@@ -112,10 +126,36 @@ private const PASSWORD = 'your-password';
 
 ### 6.2 セキュリティの強化
 - データベースユーザーに適切な権限のみを付与
-- ファイルアップロードディレクトリへの直接アクセス制限
+- ファイルアップロードディレクトリへの直接アクセス制限（下記）
 - HTTPS接続の設定
 
-### 6.3 パフォーマンス最適化
+**アップロードディレクトリへの直接アクセス制限**
+
+アップロードされた音声は `api/download.php` を通して配信します。`api/uploads/audio/` を直接開けないようにしてください。
+（保存するファイルの拡張子はファイルの中身から判定した音声形式で決めるので、`.php` などが置かれることはありませんが、念のための対策です）
+
+- **Apache（XAMPP を含む）**：`api/uploads/audio/.htaccess` で設定済みです。
+  `.htaccess` が効くように、そのディレクトリで `AllowOverride All`（または `AuthConfig Limit`）が有効になっている必要があります（XAMPP の初期設定では有効）。
+- **nginx**：`.htaccess` は読まれないので、サーバー設定に次を追加してください（パスは配置に合わせて変更）。
+
+```nginx
+# ^~ を付けると、PHP 用の「location ~ \.php$」より優先される
+location ^~ /api/uploads/ {
+    deny all;
+}
+```
+
+設定後、`https://（サーバー）/api/uploads/audio/.gitkeep` を開いて 403 になることを確認してください（200 で空のページが出るなら制限が効いていません）。
+
+### 6.3 API の置き場所を変える
+本番（`https://sound-library.redosila.com`）はドメイン直下の `api/` に API を置いています。
+別の場所に置く場合は、ビルド時に `REACT_APP_API_BASE_URL` で指定します。
+
+```bash
+REACT_APP_API_BASE_URL=https://example.com/sound-library3/api npm run build
+```
+
+### 6.4 パフォーマンス最適化
 - データベースインデックスの最適化
 - 大きな音声ファイルのための適切なサーバー設定
 - CDN配信の検討

@@ -3,6 +3,7 @@ import { School } from 'lucide-react';
 import './AdminPage.css';
 import Icon from '../components/Icon';
 import { saveSongData } from '../utils/indexedDB';
+import { API_BASE_URL } from '../utils/api';
 
 const AdminPage = () => {
   const [rooms, setRooms] = useState([]);
@@ -19,8 +20,6 @@ const AdminPage = () => {
     room_name: '',
     teacher_name: ''
   });
-
-  const API_BASE_URL = '/api';
 
   useEffect(() => {
     loadRooms();

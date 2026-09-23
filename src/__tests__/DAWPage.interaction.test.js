@@ -696,6 +696,8 @@ describe('クラウド保存', () => {
     await renderDAW();
     await openDialogAndSave();
     await waitFor(() => expect(window.alert).toHaveBeenCalledWith('楽曲をクラウドに保存しました！'));
+    // 他のページと同じ API の置き場所（src/utils/api.js の API_BASE_URL）を使う
+    expect(global.fetch.mock.calls.map(([url]) => url)).toEqual(['/api/rooms.php', '/api/songs.php']);
     const [, options] = global.fetch.mock.calls.find(([url]) => url.includes('songs'));
     const body = JSON.parse(options.body);
     expect(body.room_id).toBe(7);

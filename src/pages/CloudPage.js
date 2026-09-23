@@ -10,10 +10,8 @@ import {
   primeAudioElement,
   withDetectedMimeType
 } from '../utils/audio';
-import { fetchJson, findRoomByNumber, getUserIdentifier } from '../utils/api';
+import { API_BASE_URL, fetchJson, findRoomByNumber, getUserIdentifier } from '../utils/api';
 import { isEnterKey } from '../utils/keyboard';
-
-const API_BASE_URL = '../api';
 
 // ファイル名に使えない文字を除く
 const toSafeFileName = (name) => (name || 'sound').replace(/[\\/:*?"<>|]/g, '_').trim() || 'sound';

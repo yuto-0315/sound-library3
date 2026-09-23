@@ -64,7 +64,7 @@ import {
   rescaleTracks,
   serializeProject
 } from '../utils/project';
-import { fetchJson, findRoomByNumber } from '../utils/api';
+import { API_BASE_URL, fetchJson, findRoomByNumber } from '../utils/api';
 import {
   clearTrackHighlights,
   createFloatingDragLabel,
@@ -1299,7 +1299,7 @@ const DAWPage = () => {
     setError(null);
     try {
       // 部屋IDを取得
-      const roomsData = await fetchJson('/api/rooms.php');
+      const roomsData = await fetchJson(`${API_BASE_URL}/rooms.php`);
       if (!roomsData.success) {
         setError('部屋情報の取得に失敗しました');
         return;
@@ -1320,7 +1320,7 @@ const DAWPage = () => {
         trackIdCounter: trackIdCounterRef.current
       }, { includeSounds: 'used' });
 
-      const result = await fetchJson('/api/songs.php', {
+      const result = await fetchJson(`${API_BASE_URL}/songs.php`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'

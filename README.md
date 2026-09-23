@@ -80,7 +80,7 @@
 - TalkBack（Android）
 - 音声認識ソフトウェア
 
-詳細は [アクセシビリティガイド](docs/ACCESSIBILITY.md) をご覧ください。
+アクセシビリティのテストについては [TEST_DOCUMENTATION.md](TEST_DOCUMENTATION.md) の「アクセシビリティテスト」をご覧ください。
 
 ## 開発環境のセットアップ
 
@@ -93,7 +93,7 @@
 1. リポジトリのクローン
 ```bash
 git clone <repository-url>
-cd sound-library2
+cd sound-library3
 ```
 
 2. 依存関係のインストール
@@ -108,12 +108,18 @@ npm start
 
 4. ブラウザで http://localhost:3000 にアクセス
 
+クラウド機能（みんなで共有・クラウド保存・先生用ページ）を試すときは、XAMPP で PHP の API も動かしておきます。
+開発サーバーは `/api` へのアクセスを `http://localhost/sound-library3/api` に中継します（`src/setupProxy.js`）。
+手順と中継先の変え方は [SETUP.md](SETUP.md) の「5.3 開発サーバーから API を使う」をご覧ください。
+
 ## ビルド
 
 本番用のビルドを作成:
 ```bash
 npm run build
 ```
+
+公開用のビルドは `docs/` に置いています。`npm run deploy` は、ビルドして `docs/` を作り直し、main にコミットして push します。
 
 ## 使用方法
 

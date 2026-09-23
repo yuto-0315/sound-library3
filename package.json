@@ -103,6 +103,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.56.0",
-    "express": "^5.1.0"
+    "express": "^5.1.0",
+    "http-proxy-middleware": "^2.0.10"
   }
 }

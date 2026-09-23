@@ -86,6 +86,8 @@ describe('部屋に入る', () => {
     expect(storage['sound-library-room']).toBe('101');
     expect(await screen.findByText('みんなの太鼓')).toBeInTheDocument();
     expect(global.fetch.mock.calls.map(([url]) => url)).toContainEqual(expect.stringContaining('audio.php?room_id=3'));
+    // 以前はこのページだけ '../api' を使っていた。他のページと同じ '/api' にそろえた
+    global.fetch.mock.calls.forEach(([url]) => expect(url).toMatch(/^\/api\/(rooms|audio)\.php/));
   });
 
   test('前回の部屋に自動で入る', async () => {

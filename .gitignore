@@ -33,6 +33,7 @@ Thumbs.db
 # Uploaded files (don't commit user uploads)
 api/uploads/audio/*
 !api/uploads/audio/.gitkeep
+!api/uploads/audio/.htaccess
 
 # Logs
 *.log
@@ -40,6 +41,12 @@ logs/
 
 # Coverage directory used by tools like istanbul
 coverage/
+
+# Playwright（E2E テスト）の結果
+playwright-report/
+test-results/
+blob-report/
+/playwright/.cache/
 
 # Temporary files
 *.tmp

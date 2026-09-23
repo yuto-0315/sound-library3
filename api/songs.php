@@ -131,6 +131,11 @@ function handleGetSongDetail($pdo, $uid) {
 // 楽曲保存
 function handleSaveSong($pdo) {
     $input = json_decode(file_get_contents('php://input'), true);
+    if (!is_array($input)) {
+        // post_max_size を超えると本文が空になる
+        sendError('楽曲データを読み取れませんでした。データが大きすぎる可能性があります。', 413);
+        return;
+    }
     
     $roomId = $input['room_id'] ?? null;
     $studentName = $input['student_name'] ?? null;
@@ -191,6 +196,10 @@ function handleSaveSong($pdo) {
 // 楽曲更新
 function handleUpdateSong($pdo) {
     $input = json_decode(file_get_contents('php://input'), true);
+    if (!is_array($input)) {
+        sendError('楽曲データを読み取れませんでした。データが大きすぎる可能性があります。', 413);
+        return;
+    }
     
     $uid = $input['uid'] ?? null;
     $songTitle = $input['song_title'] ?? null;

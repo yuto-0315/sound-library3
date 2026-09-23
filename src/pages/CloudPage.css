@@ -391,7 +391,7 @@
 }
 
 /* エラーメッセージ */
-.error-message {
+.cloud-page .error-message {
   background: #fff5f5;
   color: #e53e3e;
   padding: 15px;

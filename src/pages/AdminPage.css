@@ -329,7 +329,7 @@
   font-size: 1.1rem;
 }
 
-.error-message {
+.admin-page .error-message {
   background: #fef2f2;
   color: #dc2626;
   padding: 15px 20px;

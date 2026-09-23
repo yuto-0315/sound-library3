@@ -1,224 +1,107 @@
+// 音あつめページの基本動作。
+// （以前のこのファイルはアプリに無い機能（スペースキーでの録音、ファイルのドラッグ＆ドロップ枠、
+//   複数ファイル選択）や、インストールされていない user-event v14 の API を前提にしており、
+//   一度も通っていなかったため書き直した。録音・保存の詳しい回帰テストは
+//   SoundCollection.recording.test.js にある）
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 import SoundCollection from '../pages/SoundCollection';
-
-// MediaRecorder APIのモック
-global.MediaRecorder = jest.fn().mockImplementation(() => ({
-  start: jest.fn(),
-  stop: jest.fn(),
-  addEventListener: jest.fn(),
-  removeEventListener: jest.fn(),
-  state: 'inactive',
-  stream: {
-    getTracks: jest.fn(() => [
-      { stop: jest.fn() }
-    ])
-  }
-}));
-
-// getUserMedia APIのモック
-Object.defineProperty(navigator, 'mediaDevices', {
-  writable: true,
-  value: {
-    getUserMedia: jest.fn(() => 
-      Promise.resolve({
-        getTracks: jest.fn(() => [
-          { stop: jest.fn() }
-        ])
-      })
-    )
-  }
-});
-
-// URL.createObjectURL, URL.revokeObjectURLのモック
-global.URL.createObjectURL = jest.fn(() => 'blob:mock-url');
-global.URL.revokeObjectURL = jest.fn();
-
-// File reader APIのモック
-global.FileReader = jest.fn().mockImplementation(() => ({
-  readAsArrayBuffer: jest.fn(),
-  result: new ArrayBuffer(8),
-  addEventListener: jest.fn(),
-  removeEventListener: jest.fn()
-}));
+import { installFakeIndexedDB } from '../test-utils/fakeIndexedDB';
+import { installMemoryLocalStorage } from '../test-utils/storage';
+import { TestFileReader, makeAudioBytes } from '../test-utils/audioFixtures';
+import { takeUnsavedDraft } from '../utils/unsavedDraft';
 
 describe('SoundCollection Component', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    takeUnsavedDraft(); // 前のテストで残った「保存前の録音」を捨てる
+    installFakeIndexedDB();
+    installMemoryLocalStorage();
+    window.confirm = jest.fn(() => true);
+    global.FileReader = TestFileReader;
+    URL.createObjectURL.mockImplementation(() => 'blob:mock-url');
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    jest.spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
   test('renders sound collection interface', () => {
     render(<SoundCollection />);
-    
-    // メインタイトルが表示される
-    expect(screen.getByText('音あつめ')).toBeInTheDocument();
-    
-    // 録音ボタンが表示される
-    expect(screen.getByRole('button', { name: /録音開始/i })).toBeInTheDocument();
-    
-    // ファイルアップロードセクションが表示される
-    expect(screen.getByText('ファイルから音を追加')).toBeInTheDocument();
-    expect(screen.getByLabelText('音声ファイルを選択')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2, name: /音あつめページ/ })).toBeInTheDocument();
+    expect(screen.getByText(/身の回りにある音を録音したり/)).toBeInTheDocument();
   });
 
   test('has proper accessibility structure', () => {
     render(<SoundCollection />);
-    
-    // メインランドマークが存在する
-    expect(screen.getByRole('main')).toBeInTheDocument();
-    
-    // セクションが適切にラベル付けされている
-    expect(screen.getByLabelText('録音機能')).toBeInTheDocument();
-    expect(screen.getByLabelText('ファイルアップロード')).toBeInTheDocument();
-    expect(screen.getByLabelText('録音済み音声リスト')).toBeInTheDocument();
-    
-    // アクセシビリティ用のライブリージョンが存在する
-    expect(screen.getByRole('status')).toBeInTheDocument();
-    expect(screen.getByRole('alert')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: /音を録音する/ })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: /音ファイルをアップロード/ })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: '録音操作' })).toBeInTheDocument();
   });
 
   test('displays recording controls correctly', () => {
     render(<SoundCollection />);
-    
-    const recordButton = screen.getByRole('button', { name: /録音開始/i });
-    
-    // 録音ボタンの初期状態
-    expect(recordButton).toBeInTheDocument();
-    expect(recordButton).not.toBeDisabled();
-    
-    // キーボードショートカットの表示
-    expect(screen.getByText('スペースキー: 録音開始/停止')).toBeInTheDocument();
+    const recordButton = screen.getByRole('button', { name: /録音開始/ });
+    expect(recordButton).toHaveAttribute('type', 'button');
+    expect(recordButton).toHaveAttribute('aria-describedby', 'record-instructions');
+    expect(screen.queryByRole('button', { name: /録音停止/ })).not.toBeInTheDocument();
   });
 
   test('handles file input correctly', () => {
     render(<SoundCollection />);
-    
-    const fileInput = screen.getByLabelText('音声ファイルを選択');
-    
-    // ファイル入力の属性確認
-    expect(fileInput).toHaveAttribute('type', 'file');
-    expect(fileInput).toHaveAttribute('accept', 'audio/*');
-    expect(fileInput).toHaveAttribute('multiple');
+    const input = screen.getByLabelText('音声ファイルを選択');
+    expect(input).toHaveAttribute('type', 'file');
+    expect(input).toHaveAttribute('accept', 'audio/*');
+    expect(input).not.toHaveAttribute('multiple'); // 1 回に 1 つずつ名前を付けて保存する
   });
 
   test('displays empty state message when no recordings', () => {
     render(<SoundCollection />);
-    
-    // 録音がない場合のメッセージ
-    expect(screen.getByText('まだ音が保存されていません。録音またはファイルをアップロードしてください。')).toBeInTheDocument();
-  });
-
-  test('handles keyboard shortcuts', async () => {
-    const user = userEvent.setup();
-    render(<SoundCollection />);
-    
-    const recordButton = screen.getByRole('button', { name: /録音開始/i });
-    
-    // スペースキーで録音開始
-    await user.keyboard(' ');
-    
-    // MediaRecorderが呼び出されることを期待
-    await waitFor(() => {
-      expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalled();
-    });
+    expect(screen.getByText('まだ録音した音がありません。上の録音ボタンから始めましょう！')).toBeInTheDocument();
   });
 
   test('shows error messages when microphone access fails', async () => {
-    // getUserMediaを失敗するようにモック
-    navigator.mediaDevices.getUserMedia.mockRejectedValueOnce(
-      new Error('Permission denied')
-    );
-    
-    const user = userEvent.setup();
+    navigator.mediaDevices.getUserMedia.mockImplementation(() => Promise.reject(Object.assign(new Error('x'), { name: 'NotFoundError' })));
+    global.MediaRecorder = function MediaRecorder() {};
     render(<SoundCollection />);
-    
-    const recordButton = screen.getByRole('button', { name: /録音開始/i });
-    
-    await user.click(recordButton);
-    
-    // エラーメッセージが表示される
-    await waitFor(() => {
-      expect(screen.getByText(/マイクにアクセスできませんでした/)).toBeInTheDocument();
-    });
+    fireEvent.click(screen.getByRole('button', { name: /録音開始/ }));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('マイクが見つかりません'));
   });
 
   test('handles file upload', async () => {
-    const user = userEvent.setup();
     render(<SoundCollection />);
-    
-    const fileInput = screen.getByLabelText('音声ファイルを選択');
-    
-    // ファイルをアップロード
-    const file = new File(['audio content'], 'test.mp3', { type: 'audio/mp3' });
-    await user.upload(fileInput, file);
-    
-    // ファイルが選択されたことを確認
-    expect(fileInput.files[0]).toBe(file);
-    expect(fileInput.files).toHaveLength(1);
+    fireEvent.change(screen.getByLabelText('音声ファイルを選択'), {
+      target: { files: [new File([makeAudioBytes('wav', 20)], 'かえるの声.wav', { type: 'audio/wav' })] }
+    });
+    expect(await screen.findByRole('dialog', { name: /音に名前をつけよう/ })).toBeInTheDocument();
+    expect(screen.getByLabelText(/音の名前/)).toHaveValue('かえるの声');
   });
 
   test('displays recording instructions', () => {
     render(<SoundCollection />);
-    
-    // 使用方法の説明が表示される
-    expect(screen.getByText('録音ボタンを押すか、スペースキーで録音を開始できます。')).toBeInTheDocument();
-    expect(screen.getByText('録音中は再度ボタンを押すかスペースキーで停止します。')).toBeInTheDocument();
-    expect(screen.getByText('音声ファイル（MP3、WAV、M4A等）をドラッグ＆ドロップまたは選択してアップロードできます。')).toBeInTheDocument();
+    expect(screen.getByText('iPhone/iPadをお使いの方へ：')).toBeInTheDocument();
+    expect(screen.getByText(/「設定」アプリ →「Safari」→「マイク」/)).toBeInTheDocument();
   });
 
   test('handles component cleanup on unmount', () => {
     const { unmount } = render(<SoundCollection />);
-    
-    // コンポーネントがアンマウントされる
-    unmount();
-    
-    // URL.revokeObjectURLが呼ばれることを期待（実際の録音がある場合）
-    // この場合は録音がないので呼ばれない
-    expect(global.URL.revokeObjectURL).not.toHaveBeenCalled();
+    expect(() => unmount()).not.toThrow();
   });
 
   test('has proper ARIA live regions', () => {
     render(<SoundCollection />);
-    
-    // ライブリージョンが適切に設定されている
-    const statusRegion = screen.getByRole('status');
-    expect(statusRegion).toHaveAttribute('aria-live', 'polite');
-    expect(statusRegion).toHaveAttribute('aria-atomic', 'true');
-    
-    const alertRegion = screen.getByRole('alert');
-    expect(alertRegion).toHaveAttribute('aria-live', 'assertive');
-    expect(alertRegion).toHaveAttribute('aria-atomic', 'true');
-  });
-
-  test('handles drag and drop for file upload', () => {
-    render(<SoundCollection />);
-    
-    const dropArea = screen.getByText('ここに音声ファイルをドラッグ＆ドロップ').closest('div');
-    
-    // ドラッグオーバー時のスタイリング
-    fireEvent.dragOver(dropArea);
-    expect(dropArea).toHaveClass('drag-over');
-    
-    // ドラッグリーブ時のスタイリング
-    fireEvent.dragLeave(dropArea);
-    expect(dropArea).not.toHaveClass('drag-over');
+    expect(screen.getByRole('alert')).toBeInTheDocument(); // エラー表示用（空のときは非表示）
+    expect(document.querySelector('[aria-live="polite"]')).toBeInTheDocument(); // お知らせ用
   });
 
   test('validates file types on upload', async () => {
-    const user = userEvent.setup();
     render(<SoundCollection />);
-    
-    const fileInput = screen.getByLabelText('音声ファイルを選択');
-    
-    // 無効なファイルタイプをアップロード
-    const invalidFile = new File(['content'], 'test.txt', { type: 'text/plain' });
-    await user.upload(fileInput, invalidFile);
-    
-    // エラーメッセージが表示される
-    await waitFor(() => {
-      expect(screen.getByText(/サポートされていないファイル形式です/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('音声ファイルを選択'), {
+      target: { files: [new File(['<html></html>'], 'page.html', { type: 'text/html' })] }
     });
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('音声ファイルを選択してください'));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 });

@@ -1,5 +1,20 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { Globe, LoaderCircle, Play, Square, X } from 'lucide-react';
 import './CloudPage.css';
+import Icon from '../components/Icon';
+import { addRecording, getAllRecordings, isQuotaExceededError } from '../utils/indexedDB';
+import {
+  blobToAudioDataUrl,
+  dataUrlToBlob,
+  getExtensionForMimeType,
+  primeAudioElement,
+  withDetectedMimeType
+} from '../utils/audio';
+import { API_BASE_URL, fetchJson, findRoomByNumber, getUserIdentifier } from '../utils/api';
+import { isEnterKey } from '../utils/keyboard';
+
+// ファイル名に使えない文字を除く
+const toSafeFileName = (name) => (name || 'sound').replace(/[\\/:*?"<>|]/g, '_').trim() || 'sound';
 
 const CloudPage = () => {
   const [roomNumber, setRoomNumber] = useState('');
@@ -10,10 +25,8 @@ const CloudPage = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedSoundFromLibrary, setSelectedSoundFromLibrary] = useState(null);
   const [librarySearchQuery, setLibrarySearchQuery] = useState('');
-  const [libraryTags, setLibraryTags] = useState([]);
   const [selectedLibraryTag, setSelectedLibraryTag] = useState('');
   const [soundLibrary, setSoundLibrary] = useState([]);
-  const [filteredLibrarySounds, setFilteredLibrarySounds] = useState([]);
   const [uploadData, setUploadData] = useState({
     fileName: '',
     studentName: '',
@@ -21,9 +34,97 @@ const CloudPage = () => {
   });
   const [newTag, setNewTag] = useState('');
   const [playingAudioId, setPlayingAudioId] = useState(null);
-  const audioRefs = useRef({});
 
-  const API_BASE_URL = '../api';
+  // 再生は 1 つの <audio> を使い回す（iOS はタップ中に一度再生した要素でないと再生を許可しない）
+  const playerRef = useRef(null);
+  const playRequestRef = useRef(0);
+
+  const getPlayer = () => {
+    if (!playerRef.current) {
+      const audio = new Audio();
+      audio.preload = 'auto';
+      audio.playsInline = true;
+      playerRef.current = { audio, url: null };
+    }
+    return playerRef.current;
+  };
+
+  const stopPlayback = useCallback(() => {
+    playRequestRef.current += 1;
+    const player = playerRef.current;
+    if (player) {
+      try {
+        player.audio.pause();
+      } catch (e) {
+        // 無視
+      }
+      if (player.url) {
+        URL.revokeObjectURL(player.url);
+        player.url = null;
+      }
+    }
+    setPlayingAudioId(null);
+  }, []);
+
+  // ページを離れたら再生を止める（止めないと別のページでも鳴り続ける）
+  useEffect(() => () => {
+    playRequestRef.current += 1;
+    const player = playerRef.current;
+    if (player) {
+      try {
+        player.audio.pause();
+      } catch (e) {
+        // 無視
+      }
+      if (player.url) URL.revokeObjectURL(player.url);
+    }
+  }, []);
+
+  // 音声ファイル一覧を読み込み
+  const loadAudioFiles = async (roomId, nameQuery = searchQuery) => {
+    try {
+      const params = new URLSearchParams({ room_id: roomId });
+      if (nameQuery) params.append('name', nameQuery);
+
+      const data = await fetchJson(`${API_BASE_URL}/audio.php?${params}`);
+      if (data.success) {
+        setAudioFiles(data.data || []);
+      } else {
+        setError(data.error || '音声ファイルの読み込みに失敗しました');
+      }
+    } catch (err) {
+      setError('音声ファイルの読み込みに失敗しました');
+      console.error('Load audio files error:', err);
+    }
+  };
+
+  // 部屋に入る
+  const joinRoom = async (roomNum) => {
+    setIsLoading(true);
+    setError('');
+
+    try {
+      const data = await fetchJson(`${API_BASE_URL}/rooms.php`);
+
+      if (data.success) {
+        const room = findRoomByNumber(data.data, roomNum);
+        if (room) {
+          setCurrentRoom(room);
+          localStorage.setItem('sound-library-room', String(roomNum).trim());
+          await loadAudioFiles(room.id);
+        } else {
+          setError('指定された部屋番号が見つかりません');
+        }
+      } else {
+        setError(data.error || '部屋情報の取得に失敗しました');
+      }
+    } catch (err) {
+      setError('サーバーに接続できませんでした');
+      console.error('Room join error:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   // ローカルストレージから部屋番号を読み込み
   useEffect(() => {
@@ -35,232 +136,167 @@ const CloudPage = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 音ライブラリーから音素材を読み込み
+  // 音ライブラリーから音素材を読み込み。
+  // 音素材は IndexedDB に保存されている（以前はここだけ古い localStorage を見ていたため、
+  // 録音した音が一覧に出ずアップロードできなかった）
   useEffect(() => {
-    const loadSoundLibrary = () => {
-      const savedSounds = JSON.parse(localStorage.getItem('soundRecordings') || '[]');
-      
-      // audioDataからBlobを復元
-      const soundsWithBlob = savedSounds.map(sound => {
-        if (sound.audioData) {
-          try {
-            const blob = base64ToBlob(sound.audioData, 'audio/wav');
-            return { ...sound, audioBlob: blob };
-          } catch (error) {
-            console.error('音声データの復元に失敗:', error);
-            return sound;
-          }
-        }
-        return sound;
+    let cancelled = false;
+    getAllRecordings()
+      .then((sounds) => {
+        if (!cancelled) setSoundLibrary(sounds);
+      })
+      .catch((err) => {
+        console.error('音ライブラリの読み込みに失敗:', err);
+        if (!cancelled) setError('音ライブラリを読み込めませんでした。ページを再読み込みしてください。');
       });
-      
-      setSoundLibrary(soundsWithBlob);
-      setFilteredLibrarySounds(soundsWithBlob);
-      
-      // 全てのタグを取得
-      const tags = [...new Set(soundsWithBlob.flatMap(sound => sound.tags))];
-      setLibraryTags(tags);
+    return () => {
+      cancelled = true;
     };
-
-    loadSoundLibrary();
   }, []);
 
-  // Base64 を Blob に変換する関数
-  const base64ToBlob = (base64, mimeType) => {
-    const byteCharacters = atob(base64.split(',')[1]);
-    const byteNumbers = new Array(byteCharacters.length);
-    for (let i = 0; i < byteCharacters.length; i++) {
-      byteNumbers[i] = byteCharacters.charCodeAt(i);
-    }
-    const byteArray = new Uint8Array(byteNumbers);
-    return new Blob([byteArray], { type: mimeType });
-  };
+  // 全てのタグ
+  const libraryTags = useMemo(
+    () => [...new Set(soundLibrary.flatMap(sound => sound.tags || []))],
+    [soundLibrary]
+  );
 
   // 音ライブラリーのフィルタリング
-  useEffect(() => {
+  const filteredLibrarySounds = useMemo(() => {
     let filtered = soundLibrary;
-    
+
     if (selectedLibraryTag) {
-      filtered = filtered.filter(sound => sound.tags.includes(selectedLibraryTag));
+      filtered = filtered.filter(sound => (sound.tags || []).includes(selectedLibraryTag));
     }
-    
+
     if (librarySearchQuery) {
-      filtered = filtered.filter(sound => 
-        sound.name.toLowerCase().includes(librarySearchQuery.toLowerCase()) ||
-        sound.tags.some(tag => tag.toLowerCase().includes(librarySearchQuery.toLowerCase()))
+      const query = librarySearchQuery.toLowerCase();
+      filtered = filtered.filter(sound =>
+        (sound.name || '').toLowerCase().includes(query) ||
+        (sound.tags || []).some(tag => tag.toLowerCase().includes(query))
       );
     }
-    
-    setFilteredLibrarySounds(filtered);
+
+    return filtered;
   }, [soundLibrary, selectedLibraryTag, librarySearchQuery]);
-
-  // 部屋に入る
-  const joinRoom = async (roomNum) => {
-    setIsLoading(true);
-    setError('');
-    
-    try {
-      const response = await fetch(`${API_BASE_URL}/rooms.php`);
-      const data = await response.json();
-      
-      if (data.success) {
-        // roomNumを数値に変換して比較
-        const room = data.data.find(r => r.room_number === parseInt(roomNum, 10));
-        if (room) {
-          setCurrentRoom(room);
-          localStorage.setItem('sound-library-room', roomNum);
-          await loadAudioFiles(room.id);
-        } else {
-          setError('指定された部屋番号が見つかりません');
-        }
-      } else {
-        setError(data.error);
-      }
-    } catch (err) {
-      setError('サーバーに接続できませんでした');
-      console.error('Room join error:', err);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // 音声ファイル一覧を読み込み
-  const loadAudioFiles = async (roomId) => {
-    try {
-      const params = new URLSearchParams({ room_id: roomId });
-      if (searchQuery) params.append('name', searchQuery);
-      
-      const response = await fetch(`${API_BASE_URL}/audio.php?${params}`);
-      const data = await response.json();
-      
-      if (data.success) {
-        setAudioFiles(data.data);
-      } else {
-        setError(data.error);
-      }
-    } catch (err) {
-      setError('音声ファイルの読み込みに失敗しました');
-      console.error('Load audio files error:', err);
-    }
-  };
 
   // ファイルアップロード
   const handleUpload = async (e) => {
     e.preventDefault();
-    
+
     if (!selectedSoundFromLibrary || !currentRoom) {
       setError('音ライブラリーから音素材を選択してください');
       return;
     }
 
+    let audioBlob;
+    try {
+      // 中身に合った形式・拡張子で送る（以前は mp4 でも「.wav」として送っていたため、
+      // 共有された音が iPad で再生できなかった）
+      audioBlob = dataUrlToBlob(selectedSoundFromLibrary.audioData);
+    } catch (err) {
+      console.error('音声データの変換に失敗:', err);
+      setError('この音素材の音声データが壊れているため、アップロードできません');
+      return;
+    }
+
     setIsLoading(true);
-    
+    setError('');
+
+    const baseName = toSafeFileName(selectedSoundFromLibrary.name);
     const formData = new FormData();
-    formData.append('audio_file', selectedSoundFromLibrary.audioBlob, selectedSoundFromLibrary.name + '.wav');
+    formData.append('audio_file', audioBlob, `${baseName}.${getExtensionForMimeType(audioBlob.type)}`);
     formData.append('room_id', currentRoom.id);
     formData.append('file_name', uploadData.fileName || selectedSoundFromLibrary.name);
     formData.append('student_name', uploadData.studentName);
     formData.append('tags', JSON.stringify(uploadData.tags));
 
     try {
-      const response = await fetch(`${API_BASE_URL}/audio.php`, {
+      const data = await fetchJson(`${API_BASE_URL}/audio.php`, {
         method: 'POST',
         body: formData
       });
-      
-      const data = await response.json();
-      
+
       if (data.success) {
         // フォームリセット
         setSelectedSoundFromLibrary(null);
         setUploadData({ fileName: '', studentName: '', tags: [] });
-        
+
         // 一覧を再読み込み
         await loadAudioFiles(currentRoom.id);
-        
+
         alert('アップロードが完了しました！');
       } else {
-        setError(data.error);
+        setError(data.error || 'アップロードに失敗しました');
       }
     } catch (err) {
-      setError('アップロードに失敗しました');
+      setError(err.message || 'アップロードに失敗しました');
       console.error('Upload error:', err);
     } finally {
       setIsLoading(false);
     }
   };
 
+  const buildDownloadUrl = (audioFile) => {
+    const params = new URLSearchParams({ uid: audioFile.uid, user_id: getUserIdentifier() });
+    return `${API_BASE_URL}/download.php?${params}`;
+  };
+
+  const fetchAudioBlob = async (audioFile) => {
+    const response = await fetch(buildDownloadUrl(audioFile));
+    if (!response.ok) {
+      throw new Error('音声ファイルの読み込みに失敗しました');
+    }
+    // サーバーの Content-Type が間違っていても中身に合わせて直す
+    return withDetectedMimeType(await response.blob());
+  };
+
   // ダウンロード（音ライブラリーに追加）
   const handleDownload = async (audioFile) => {
+    if (soundLibrary.some(sound => sound.cloudUid && sound.cloudUid === audioFile.uid)) {
+      alert(`「${audioFile.file_name}」は既に音ライブラリーに追加されています`);
+      return;
+    }
+
     setIsLoading(true);
     setError('');
-    
+
     try {
-      const userIdentifier = localStorage.getItem('user-identifier') || 
-                            'user_' + Math.random().toString(36).substr(2, 9);
-      localStorage.setItem('user-identifier', userIdentifier);
-      
-      const downloadUrl = `${API_BASE_URL}/download.php?uid=${audioFile.uid}&user_id=${userIdentifier}`;
-      
-      // ファイルをダウンロードしてBlobとして取得
-      const response = await fetch(downloadUrl);
-      if (!response.ok) {
-        throw new Error('ダウンロードに失敗しました');
-      }
-      
-      const audioBlob = await response.blob();
-      
-      // Blob を Base64 に変換
-      const base64Data = await blobToBase64(audioBlob);
-      
-      // 音ライブラリーに追加
+      const audioBlob = await fetchAudioBlob(audioFile);
+
       const newSound = {
-        id: Date.now() + Math.random(),
         name: audioFile.file_name,
-        audioData: base64Data,
-        audioBlob: audioBlob,
+        audioData: await blobToAudioDataUrl(audioBlob),
         tags: audioFile.tags || [],
         createdAt: new Date().toISOString(),
-        source: 'cloud-download'
+        source: 'cloud-download',
+        cloudUid: audioFile.uid
       };
-      
-      // LocalStorageに保存
-      const savedSounds = JSON.parse(localStorage.getItem('soundRecordings') || '[]');
-      const updatedSounds = [...savedSounds, newSound];
-      localStorage.setItem('soundRecordings', JSON.stringify(updatedSounds));
-      
-      // 音ライブラリーの状態を更新
-      setSoundLibrary(prev => [...prev, newSound]);
-      
+
+      // IndexedDB に保存（以前は容量の小さい localStorage に保存していて、すぐ失敗していた）
+      const id = await addRecording(newSound);
+      setSoundLibrary(prev => [...prev, { ...newSound, id }]);
+
       alert(`「${audioFile.file_name}」を音ライブラリーに追加しました！`);
-      
     } catch (err) {
-      setError('ダウンロードに失敗しました');
+      setError(isQuotaExceededError(err)
+        ? '保存できる容量が足りません。音ライブラリで使わない音を削除してください。'
+        : 'ダウンロードに失敗しました');
       console.error('Download error:', err);
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Blob を Base64 に変換する関数
-  const blobToBase64 = (blob) => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
-  };
-
   // タグ追加
   const addTag = () => {
-    if (newTag && !uploadData.tags.includes(newTag)) {
+    const tag = newTag.trim();
+    if (tag && !uploadData.tags.includes(tag)) {
       setUploadData(prev => ({
         ...prev,
-        tags: [...prev.tags, newTag]
+        tags: [...prev.tags, tag]
       }));
-      setNewTag('');
     }
+    setNewTag('');
   };
 
   // タグ削除
@@ -273,6 +309,7 @@ const CloudPage = () => {
 
   // 部屋から出る
   const leaveRoom = () => {
+    stopPlayback();
     setCurrentRoom(null);
     setAudioFiles([]);
     setRoomNumber('');
@@ -288,133 +325,41 @@ const CloudPage = () => {
 
   // 音声ファイルを再生
   const playAudioFile = async (audioFile) => {
+    // 同じファイルの場合は停止
+    if (playingAudioId === audioFile.id) {
+      stopPlayback();
+      return;
+    }
+    stopPlayback();
+
+    const player = getPlayer();
+    const requestId = playRequestRef.current;
+    // ダウンロードを待つとタップ操作の扱いが切れるので、先に要素の再生許可を取っておく
+    primeAudioElement(player.audio);
+    setPlayingAudioId(audioFile.id);
+
     try {
-      // 既に再生中の音声を停止
-      if (playingAudioId && audioRefs.current[playingAudioId]) {
-        audioRefs.current[playingAudioId].pause();
-        audioRefs.current[playingAudioId].currentTime = 0;
-      }
+      const audioBlob = await fetchAudioBlob(audioFile);
+      if (requestId !== playRequestRef.current) return; // 途中で別の操作をした
 
-      // 同じファイルの場合は停止
-      if (playingAudioId === audioFile.id) {
-        setPlayingAudioId(null);
-        return;
-      }
-
-      // 音声ファイルをダウンロード
-      const userIdentifier = localStorage.getItem('user-identifier') || 
-                            'user_' + Math.random().toString(36).substr(2, 9);
-      localStorage.setItem('user-identifier', userIdentifier);
-      
-      const downloadUrl = `${API_BASE_URL}/download.php?uid=${audioFile.uid}&user_id=${userIdentifier}`;
-      
-      const response = await fetch(downloadUrl);
-      if (!response.ok) {
-        throw new Error('音声ファイルの読み込みに失敗しました');
-      }
-      
-      // レスポンスのContent-Typeを確認
-      const contentType = response.headers.get('content-type');
-      console.log('📥 CloudPage: Response Content-Type:', contentType, 'for file:', audioFile.file_name);
-      
-      const audioBlob = await response.blob();
-      
-      // Blobのタイプが適切でない場合は audio/wav に変換
-      let finalBlob = audioBlob;
-      if (!audioBlob.type || audioBlob.type === 'application/octet-stream') {
-        console.log('⚠️ Converting blob type to audio/wav for:', audioFile.file_name);
-        finalBlob = new Blob([audioBlob], { type: 'audio/wav' });
-      }
-      
-      console.log('📦 CloudPage: Blob info:', {
-        fileName: audioFile.file_name,
-        blobType: finalBlob.type,
-        blobSize: finalBlob.size,
-        originalType: audioBlob.type
-      });
-      
-      const audioUrl = URL.createObjectURL(finalBlob);
-      
-      // Audio要素を作成して再生（iPad Safari対応）
-      const audio = new Audio();
-      audio.src = audioUrl;
-      audio.preload = 'auto';
-      audio.playsInline = true; // iOS対策
-      audioRefs.current[audioFile.id] = audio;
-      
-      console.log('🎵 CloudPage: Attempting to play audio:', audioFile.file_name);
-      
-      audio.addEventListener('ended', () => {
-        setPlayingAudioId(null);
-        URL.revokeObjectURL(audioUrl);
-        delete audioRefs.current[audioFile.id];
-        console.log('✓ CloudPage: Audio ended:', audioFile.file_name);
-      });
-      
-      audio.addEventListener('error', (e) => {
-        console.error('❌ CloudPage: Audio error:', e, {
-          error: audio.error,
-          errorCode: audio.error?.code,
-          errorMessage: audio.error?.message,
-          readyState: audio.readyState,
-          networkState: audio.networkState
-        });
-        setError('音声の再生に失敗しました');
-        setPlayingAudioId(null);
-        URL.revokeObjectURL(audioUrl);
-        delete audioRefs.current[audioFile.id];
-      });
-      
-      audio.addEventListener('loadeddata', () => {
-        console.log('✓ CloudPage: Audio loaded:', audioFile.file_name, {
-          duration: audio.duration,
-          readyState: audio.readyState
-        });
-      });
-      
-      // 音声をロード
-      audio.load();
-      
-      // ロード完了を待ってから再生
-      const playAudio = async () => {
-        // readyStateが十分な状態になるまで待機（最大3秒）
-        const waitForReady = new Promise((resolve) => {
-          if (audio.readyState >= 2) { // HAVE_CURRENT_DATA以上
-            resolve(true);
-            return;
-          }
-          
-          const checkReady = setInterval(() => {
-            if (audio.readyState >= 2) {
-              clearInterval(checkReady);
-              resolve(true);
-            }
-          }, 50);
-          
-          setTimeout(() => {
-            clearInterval(checkReady);
-            console.warn('⚠️ CloudPage: Audio load timeout, trying to play anyway:', audioFile.file_name);
-            resolve(false);
-          }, 3000);
-        });
-        
-        await waitForReady;
-        
-        console.log('🎵 CloudPage: Starting playback:', audioFile.file_name, {
-          readyState: audio.readyState,
-          networkState: audio.networkState
-        });
-        
-        await audio.play();
-        setPlayingAudioId(audioFile.id);
-        console.log('✓ CloudPage: Playback started successfully:', audioFile.file_name);
+      const audioUrl = URL.createObjectURL(audioBlob);
+      player.url = audioUrl;
+      player.audio.onended = () => {
+        if (requestId === playRequestRef.current) stopPlayback();
       };
-      
-      await playAudio();
-      
+      player.audio.onerror = () => {
+        if (requestId !== playRequestRef.current) return;
+        console.error('❌ CloudPage: Audio error:', player.audio.error);
+        setError('この音声はこの端末では再生できませんでした');
+        stopPlayback();
+      };
+      player.audio.src = audioUrl;
+      await player.audio.play();
     } catch (err) {
+      if (requestId !== playRequestRef.current) return;
       setError('音声の再生に失敗しました');
       console.error('Play audio error:', err);
+      stopPlayback();
     }
   };
 
@@ -422,7 +367,7 @@ const CloudPage = () => {
     return (
       <div className="cloud-page">
         <div className="room-join-container">
-          <h2>🌐 クラウド音声共有</h2>
+          <h2><Icon icon={Globe} /> クラウド音声共有</h2>
           <p>部屋番号を入力して音声を共有しましょう</p>
           
           <form onSubmit={(e) => { e.preventDefault(); joinRoom(roomNumber); }} 
@@ -458,10 +403,10 @@ const CloudPage = () => {
   return (
     <div className="cloud-page">
       <header className="cloud-header">
-        <h2>🌐 クラウド音声共有</h2>
+        <h2><Icon icon={Globe} /> クラウド音声共有</h2>
         <div className="room-info">
           <span>部屋: {currentRoom.room_number} - {currentRoom.room_name}</span>
-          <button onClick={leaveRoom} className="leave-button">退室</button>
+          <button type="button" onClick={leaveRoom} className="leave-button">退室</button>
         </div>
       </header>
 
@@ -527,26 +472,20 @@ const CloudPage = () => {
                     <div className="sound-info">
                       <h5>{sound.name}</h5>
                       <div className="sound-tags">
-                        {sound.tags.map(tag => (
+                        {(sound.tags || []).map(tag => (
                           <span key={tag} className="tag small">{tag}</span>
                         ))}
                       </div>
                     </div>
                     <audio 
                       controls 
-                      src={sound.audioData || (sound.audioBlob ? URL.createObjectURL(sound.audioBlob) : null)}
+                      src={sound.audioData || undefined}
                       className="mini-audio-player"
-                      preload="auto"
+                      preload="none"
                       playsInline
                       onClick={(e) => e.stopPropagation()}
                       onError={(e) => {
                         console.error('CloudPage音声再生エラー:', e, 'sound:', sound.name);
-                      }}
-                      onLoadStart={() => {
-                        console.log('🎵 Loading audio in CloudPage:', sound.name);
-                      }}
-                      onCanPlay={() => {
-                        console.log('✓ Audio can play in CloudPage:', sound.name);
                       }}
                     >
                       <track kind="captions" label="音声説明" srcLang="ja" />
@@ -594,7 +533,7 @@ const CloudPage = () => {
                 onChange={(e) => setNewTag(e.target.value)}
                 placeholder="タグを追加"
                 className="tag-input"
-                onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), addTag())}
+                onKeyDown={(e) => { if (isEnterKey(e)) { e.preventDefault(); addTag(); } }}
               />
               <button type="button" onClick={addTag} className="tag-add-button">追加</button>
             </div>
@@ -603,7 +542,7 @@ const CloudPage = () => {
               {uploadData.tags.map(tag => (
                 <span key={tag} className="tag">
                   {tag}
-                  <button type="button" onClick={() => removeTag(tag)} className="tag-remove">×</button>
+                  <button type="button" onClick={() => removeTag(tag)} className="tag-remove touch-target-expand" aria-label={`タグ「${tag}」を削除`}><Icon icon={X} size={12} /></button>
                 </span>
               ))}
             </div>
@@ -625,7 +564,7 @@ const CloudPage = () => {
             placeholder="ファイル名で検索"
             className="search-input"
           />
-          <button onClick={handleSearch} className="search-button">検索</button>
+          <button type="button" onClick={handleSearch} className="search-button">検索</button>
         </div>
       </section>
 
@@ -648,9 +587,9 @@ const CloudPage = () => {
                     <span>アップロード日: {new Date(audioFile.upload_date).toLocaleDateString('ja-JP')}</span>
                   </div>
                   
-                  {audioFile.tags.length > 0 && (
+                  {(audioFile.tags || []).length > 0 && (
                     <div className="audio-tags">
-                      {audioFile.tags.map(tag => (
+                      {(audioFile.tags || []).map(tag => (
                         <span key={tag} className="audio-tag">{tag}</span>
                       ))}
                     </div>
@@ -659,18 +598,21 @@ const CloudPage = () => {
                 
                 <div className="audio-actions">
                   <button 
+                    type="button"
                     onClick={() => playAudioFile(audioFile)} 
                     className="play-button"
                     title={playingAudioId === audioFile.id ? '停止' : '再生'}
+                    aria-label={`${audioFile.file_name}を${playingAudioId === audioFile.id ? '停止' : '再生'}`}
                   >
-                    {playingAudioId === audioFile.id ? '⏹️' : '▶️'}
+                    <Icon icon={playingAudioId === audioFile.id ? Square : Play} fill="currentColor" />
                   </button>
                   <button 
+                    type="button"
                     onClick={() => handleDownload(audioFile)} 
                     className="download-button"
                     disabled={isLoading}
                   >
-                    {isLoading ? '追加中...' : '音ライブラリーに追加'}
+                    {isLoading ? <><Icon icon={LoaderCircle} className="icon-spin" /> 追加中...</> : '音ライブラリーに追加'}
                   </button>
                 </div>
               </div>

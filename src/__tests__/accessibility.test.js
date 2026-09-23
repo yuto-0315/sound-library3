@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom';
 import '@testing-library/jest-dom';
 import SoundCollection from '../pages/SoundCollection';
 import Navigation from '../components/Navigation';
+import App from '../App';
 
 // アクセシビリティテスト用のヘルパー関数
 const renderWithRouter = (component) => {
@@ -27,7 +28,7 @@ describe('Accessibility Tests', () => {
       
       // 全てのナビゲーションリンクがmenuitem roleを持つ
       const menuItems = screen.getAllByRole('menuitem');
-      expect(menuItems).toHaveLength(3);
+      expect(menuItems).toHaveLength(4);
     });
 
     test('has proper aria labels and descriptions', () => {
@@ -89,7 +90,7 @@ describe('Accessibility Tests', () => {
       renderWithRouter(<SoundCollection />);
       
       // エラー表示領域が存在する
-      const errorRegion = document.querySelector('[role=\"alert\"]');
+      const errorRegion = document.querySelector('[role="alert"]');
       expect(errorRegion).toBeInTheDocument();
     });
 
@@ -97,15 +98,11 @@ describe('Accessibility Tests', () => {
       renderWithRouter(<SoundCollection />);
       
       // セクションが適切なaria-labelledbyを持つ
-      const sections = screen.queryAllByRole('region');
-      if (sections.length > 0) {
-        sections.forEach(section => {
-          expect(section).toHaveAttribute('aria-labelledby');
-        });
-      } else {
-        // regionロールが見つからない場合はスキップ
-        expect(true).toBeTruthy();
-      }
+      const sections = screen.getAllByRole('region');
+      expect(sections.length).toBeGreaterThan(0);
+      sections.forEach(section => {
+        expect(section).toHaveAttribute('aria-labelledby');
+      });
     });
   });
 
@@ -151,8 +148,8 @@ describe('Accessibility Tests', () => {
     test('has proper alternative text for images and icons', () => {
       renderWithRouter(<SoundCollection />);
       
-      // 絵文字にrole=\"img\"とaria-labelが設定されている
-      const emojiElements = document.querySelectorAll('[role=\"img\"]');
+      // アイコンにrole="img"とaria-labelが設定されている
+      const emojiElements = document.querySelectorAll('[role="img"]');
       emojiElements.forEach(element => {
         expect(element).toHaveAttribute('aria-label');
       });
@@ -167,16 +164,14 @@ describe('Accessibility Tests', () => {
     });
 
     test('has proper landmarks', () => {
-      renderWithRouter(<SoundCollection />);
+      // main はアプリ全体（App）が持つ。App は自前の Router を持つのでそのまま描画する
+      render(<App />);
       
       // ランドマークロールが存在する
-      const mainElement = document.querySelector('main');
-      if (mainElement) {
-        expect(mainElement).toBeInTheDocument();
-      } else {
-        // mainタグが存在しない場合はスキップ
-        expect(true).toBeTruthy();
-      }
+      // （main の中の <header> はブラウザではバナー扱いされないが、テスト環境は区別しないので属性で確認する）
+      expect(document.querySelector('header[role="banner"]')).toContainElement(screen.getByRole('navigation', { name: 'メインナビゲーション' }));
+      expect(screen.getByRole('main')).toBeInTheDocument();
+      expect(screen.getByRole('navigation', { name: 'メインナビゲーション' })).toBeInTheDocument();
     });
   });
 

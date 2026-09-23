@@ -646,3 +646,13 @@
     transform: none;
   }
 }
+
+/* ほかのページへ移動して戻ったときに、保存していない音を知らせる */
+.draft-restored-notice {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #fff8e1;
+  color: #6d4c00;
+  font-weight: bold;
+}

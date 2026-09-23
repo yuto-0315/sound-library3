@@ -42,32 +42,38 @@ global.MediaRecorder = jest.fn().mockImplementation(() => ({
 // MediaRecorder.isTypeSupported のモック
 global.MediaRecorder.isTypeSupported = jest.fn().mockReturnValue(true);
 
-// getUserMedia API のモック
-Object.defineProperty(navigator, 'mediaDevices', {
-  writable: true,
-  value: {
-    getUserMedia: jest.fn(() => 
-      Promise.resolve({
-        getTracks: jest.fn(() => [
-          { stop: jest.fn(), kind: 'audio', enabled: true }
-        ]),
-        getAudioTracks: jest.fn(() => [
-          { stop: jest.fn(), kind: 'audio', enabled: true }
+// ブラウザ環境（jsdom）のテストだけで使うモック。
+// src/__tests__/setupProxy.test.js は開発サーバーの設定を node 環境でテストするので、window や navigator が無い
+const isBrowserEnvironment = typeof window !== 'undefined';
+
+if (isBrowserEnvironment) {
+  // getUserMedia API のモック
+  Object.defineProperty(navigator, 'mediaDevices', {
+    writable: true,
+    value: {
+      getUserMedia: jest.fn(() => 
+        Promise.resolve({
+          getTracks: jest.fn(() => [
+            { stop: jest.fn(), kind: 'audio', enabled: true }
+          ]),
+          getAudioTracks: jest.fn(() => [
+            { stop: jest.fn(), kind: 'audio', enabled: true }
+          ])
+        })
+      ),
+      enumerateDevices: jest.fn(() => 
+        Promise.resolve([
+          {
+            deviceId: 'default',
+            kind: 'audioinput',
+            label: 'Default - Microphone',
+            groupId: 'default'
+          }
         ])
-      })
-    ),
-    enumerateDevices: jest.fn(() => 
-      Promise.resolve([
-        {
-          deviceId: 'default',
-          kind: 'audioinput',
-          label: 'Default - Microphone',
-          groupId: 'default'
-        }
-      ])
-    )
-  }
-});
+      )
+    }
+  });
+}
 
 // URL オブジェクトのモック
 global.URL.createObjectURL = jest.fn(() => 'blob:mock-url');
@@ -117,24 +123,26 @@ const localStorageMock = {
   key: jest.fn()
 };
 
-Object.defineProperty(window, 'localStorage', {
-  value: localStorageMock
-});
+if (isBrowserEnvironment) {
+  Object.defineProperty(window, 'localStorage', {
+    value: localStorageMock
+  });
 
-// matchMedia のモック
-Object.defineProperty(window, 'matchMedia', {
-  writable: true,
-  value: jest.fn().mockImplementation(query => ({
-    matches: false,
-    media: query,
-    onchange: null,
-    addListener: jest.fn(),
-    removeListener: jest.fn(),
-    addEventListener: jest.fn(),
-    removeEventListener: jest.fn(),
-    dispatchEvent: jest.fn(),
-  })),
-});
+  // matchMedia のモック
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    value: jest.fn().mockImplementation(query => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: jest.fn(),
+      removeListener: jest.fn(),
+      addEventListener: jest.fn(),
+      removeEventListener: jest.fn(),
+      dispatchEvent: jest.fn(),
+    })),
+  });
+}
 
 // IntersectionObserver のモック
 global.IntersectionObserver = jest.fn().mockImplementation(() => ({

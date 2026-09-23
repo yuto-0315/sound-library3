@@ -13,7 +13,7 @@
   margin-bottom: 10px;
 }
 
-.error-message {
+.daw-page .error-message {
   background: linear-gradient(135deg, var(--warning-color), var(--error-color));
   color: white;
   padding: 12px 16px;
@@ -25,18 +25,33 @@
   box-shadow: 0 2px 8px rgba(220, 38, 38, 0.3);
 }
 
-.error-message button {
+/* DAW のエラーは JSX 側でアイコンを表示するので、共通の ::before アイコンは出さない */
+.daw-page .error-message::before {
+  content: none;
+}
+
+.daw-page .error-message > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.daw-page .error-message button {
   background: rgba(255, 255, 255, 0.2);
   border: none;
   color: white;
-  width: 24px;
-  height: 24px;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border-radius: 50%;
   cursor: pointer;
   transition: background 0.2s ease;
 }
 
-.error-message button:hover {
+.daw-page .error-message button:hover {
   background: rgba(255, 255, 255, 0.4);
 }
 
@@ -448,7 +463,11 @@
   background: linear-gradient(135deg, var(--primary-color), var(--primary-hover));
   color: #ffffff; /* 白色を明示的に指定 */
   border: none;
-  padding: 12px 20px;
+  padding: 12px 14px;
+  white-space: nowrap; /* 「トラッ / ク追加」のように途中で改行しない */
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   border-radius: 8px;
   font-size: 14px;
   font-weight: bold;
@@ -814,9 +833,14 @@
 }
 
 .instructions li::before {
-  content: "🎵";
+  /* lucide の music アイコン */
+  content: "";
   position: absolute;
   left: 0;
+  top: 12px;
+  width: 16px;
+  height: 16px;
+  background: url('data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="%235b5fc7" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"%3E%3Cpath d="M9 18V5l12-2v13"/%3E%3Ccircle cx="6" cy="18" r="3"/%3E%3Ccircle cx="18" cy="16" r="3"/%3E%3C/svg%3E') no-repeat center / contain;
 }
 
 /* 音素材パネルのスタイル */
@@ -973,10 +997,11 @@
 }
 
 .sound-item {
+  position: relative;
   background: linear-gradient(135deg, #667eea, #764ba2);
   color: white;
   border-radius: 12px;
-  padding: 15px;
+  padding: 15px 15px 15px 40px;
   cursor: grab;
   transition: all 0.2s ease;
   box-shadow: 0 2px 8px rgba(0,0,0,0.1);
@@ -1064,13 +1089,6 @@
   cursor: grabbing;
 }
 
-/* ドラッグ中の見た目 */
-.sound-item.dragging {
-  opacity: 0.7;
-  transform: scale(0.95);
-  cursor: grabbing;
-}
-
 /* モバイルドラッグプレビュー */
 .mobile-drag-preview {
   position: fixed;
@@ -1100,12 +1118,11 @@
   z-index: 100;
 }
 
-/* ドラッグ中はbodyのスクロールを無効化（全デバイス共通） */
+/* ドラッグ中はbodyのスクロールを無効化（全デバイス共通）
+   position: fixed にすると iPad でページが先頭に飛び、指の下の位置がずれるので使わない */
 body.dragging {
   overflow: hidden !important;
-  position: fixed !important;
-  width: 100% !important;
-  height: 100% !important;
+  overscroll-behavior: none;
 }
 
 /* ドラッグ中はタイムラインとトラックエリアのスクロールも無効化 */
@@ -1118,9 +1135,13 @@ body.dragging .tracks-area {
 /* タッチデバイス用の調整 */
 @media (hover: none) and (pointer: coarse) {
   .sound-item {
-    padding: 20px; /* タッチしやすくするため大きくする */
+    padding: 20px 20px 20px 48px; /* タッチしやすくするため大きくする */
     margin-bottom: 15px;
-    touch-action: manipulation; /* スクロールとズームのみ許可 */
+    touch-action: pan-y; /* 縦はリストのスクロール、横はドラッグ */
+  }
+
+  .sound-drag-handle {
+    width: 40px;
   }
   
   .play-sound-btn {
@@ -1131,7 +1152,7 @@ body.dragging .tracks-area {
   
   .audio-clip {
     min-height: 50px; /* タッチしやすくする */
-    touch-action: manipulation; /* スクロールとズームのみ許可 */
+    touch-action: none; /* クリップはどの方向に動かしてもドラッグ */
   }
   
   .remove-clip-btn {
@@ -1150,8 +1171,10 @@ body.dragging .tracks-area {
     touch-action: none;
   }
   
-  /* 長押しによる選択を無効化 */
-  * {
+  /* 長押しによる選択を無効化（音楽づくりページのみ）。
+     以前は全ページ・入力欄にも効いていて、古い iPad では文字を入力できなくなっていた */
+  .daw-page,
+  .daw-page * {
     -webkit-touch-callout: none;
     -webkit-user-select: none;
     -khtml-user-select: none;
@@ -1159,7 +1182,16 @@ body.dragging .tracks-area {
     -ms-user-select: none;
     user-select: none;
   }
-  
+
+  .daw-page input,
+  .daw-page textarea {
+    -webkit-touch-callout: default;
+    -webkit-user-select: text;
+    -moz-user-select: text;
+    -ms-user-select: text;
+    user-select: text;
+  }
+
   /* スクロール時の bounce 効果を無効化 */
   body {
     -webkit-overflow-scrolling: touch;
@@ -1254,6 +1286,8 @@ body.dragging .tracks-area {
   .sound-item {
     min-width: 200px;
     flex-shrink: 0;
+    /* 狭い画面では音素材が横に並ぶので、横はリストのスクロール、縦（下のタイムラインへ）はドラッグ */
+    touch-action: pan-x;
   }
   
   .daw-workspace {
@@ -1352,7 +1386,12 @@ body.dragging .tracks-area {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  width: 100%;
+  min-height: 44px;
   background: #f8f9fa;
+  color: inherit;
+  font: inherit;
+  text-align: left;
   padding: 10px 12px;
   border-radius: 8px;
   border: 1px solid #e9ecef;
@@ -1844,4 +1883,70 @@ body.dragging .tracks-area {
     width: 100%;
     text-align: center;
   }
+}
+
+/* ===== 安定化対応で追加した要素 ===== */
+
+/* 音素材のつまみ（タッチでここを持つと、どの方向にもドラッグできる） */
+.sound-drag-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  opacity: 0.85;
+  cursor: grab;
+  touch-action: none;
+  border-radius: 12px 0 0 12px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* 自動保存の状況 */
+.autosave-status {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 12px;
+  font-size: 14px;
+  color: #2e5e2e;
+}
+
+.autosave-status-error,
+.autosave-status-disabled {
+  color: #b00020;
+  font-weight: bold;
+}
+
+.retry-load-btn {
+  margin-left: 12px;
+}
+
+.daw-loading {
+  margin: 0 0 16px;
+  padding: 12px 16px;
+  border-radius: 8px;
+  background: #eef4ff;
+  color: #1a3d8f;
+  font-weight: bold;
+}
+
+/* 音声データが見つからないクリップ */
+.audio-clip.audio-clip-missing {
+  opacity: 0.55;
+  background: repeating-linear-gradient(45deg, #9e9e9e, #9e9e9e 8px, #b0b0b0 8px, #b0b0b0 16px);
+}
+
+.remove-track-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* 前回の作業内容を読み込んでいる間は操作させない */
+.daw-controls.is-loading,
+.daw-main-area.is-loading {
+  pointer-events: none;
+  opacity: 0.6;
 }

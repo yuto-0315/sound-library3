@@ -6,6 +6,7 @@
     "@testing-library/jest-dom": "^5.16.4",
     "@testing-library/react": "^13.3.0",
     "@testing-library/user-event": "^13.5.0",
+    "lucide-react": "^0.460.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.3.0",
@@ -16,7 +17,7 @@
   "scripts": {
     "test:e2e": "playwright test --config=playwright.config.js",
     "test:e2e:headed": "playwright test --headed --config=playwright.config.js",
-  "start:static": "node scripts/start-static-server.js",
+    "start:static": "node scripts/start-static-server.js",
     "start": "react-scripts start",
     "build": "react-scripts build",
     "test": "react-scripts test",
@@ -29,7 +30,7 @@
     "eject": "react-scripts eject",
     "rm": "rm -rf docs",
     "mv": "mv build docs",
-    "git": "git add . && git commit -m 'Deploy to GitHub Pages' && git push origin main",
+    "git": "git add docs && git commit -m 'Deploy to GitHub Pages' && git push origin main",
     "deploy": "npm run rm && npm run build && npm run mv && npm run git",
     "lint": "npx eslint src/ --ext .js,.jsx",
     "lint:fix": "npx eslint src/ --ext .js,.jsx --fix"
@@ -49,13 +50,26 @@
       "jsx-a11y/aria-proptypes": "error",
       "jsx-a11y/role-has-required-aria-props": "error",
       "jsx-a11y/role-supports-aria-props": "error"
-    }
+    },
+    "overrides": [
+      {
+        "files": [
+          "src/__tests__/**/*.js",
+          "src/test-utils/**/*.js"
+        ],
+        "rules": {
+          "testing-library/no-node-access": "off",
+          "testing-library/no-container": "off"
+        }
+      }
+    ]
   },
   "browserslist": {
     "production": [
       ">0.2%",
       "not dead",
-      "not op_mini all"
+      "not op_mini all",
+      "ios_saf >= 12"
     ],
     "development": [
       "last 1 chrome version",
@@ -89,6 +103,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.56.0",
-    "express": "^5.1.0"
+    "express": "^5.1.0",
+    "http-proxy-middleware": "^2.0.10"
   }
 }

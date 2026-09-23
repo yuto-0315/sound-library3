@@ -1,272 +1,416 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { Circle, FileAudio, FolderOpen, ListMusic, Mic, Pencil, Save, Square, TabletSmartphone, X } from 'lucide-react';
 import './SoundCollection.css';
+import Icon from '../components/Icon';
 import { useAnnouncement, useErrorMessages } from '../hooks/useAccessibility';
-import { saveRecording as saveRecordingToDB } from '../utils/indexedDB';
+import { addRecording, isQuotaExceededError, requestPersistentStorage } from '../utils/indexedDB';
+import {
+  blobToAudioDataUrl,
+  getSupportedRecordingMimeType,
+  isAudioFile,
+  withDetectedMimeType
+} from '../utils/audio';
+import { isEnterKey } from '../utils/keyboard';
+import { keepUnsavedDraft, takeUnsavedDraft } from '../utils/unsavedDraft';
+
+const LEGACY_RECORDINGS_KEY = 'soundRecordings';
+
+const DISCARD_CONFIRM_MESSAGE = 'まだ保存していない音があります。\n新しい音にすると、この音は消えます。よろしいですか？';
+
+const stopStream = (stream) => {
+  if (!stream) return;
+  try {
+    stream.getTracks().forEach(track => track.stop());
+  } catch (error) {
+    // 既に停止している
+  }
+};
+
+// HTTPS接続チェック（iOSでの録音に必要）
+const isSecureOrigin = () => (
+  window.location.protocol === 'https:' ||
+  window.location.hostname === 'localhost' ||
+  window.location.hostname === '127.0.0.1'
+);
+
+const getMicrophoneErrorMessage = (error) => {
+  switch (error && error.name) {
+    case 'NotAllowedError':
+    case 'SecurityError':
+      return 'マイクの使用が拒否されました。iPad の「設定」アプリ →「Safari」→「マイク」を「確認」か「許可」にしてから、もう一度お試しください。';
+    case 'NotFoundError':
+    case 'OverconstrainedError':
+      return 'マイクが見つかりません。デバイスにマイクが接続されているか確認してください。';
+    case 'NotSupportedError':
+      return 'お使いのブラウザは録音機能をサポートしていません。';
+    case 'NotReadableError':
+    case 'AbortError':
+      return 'マイクが他のアプリケーションで使用中の可能性があります。他のアプリを閉じてからもう一度お試しください。';
+    default:
+      return '録音を開始できませんでした。もう一度お試しください。';
+  }
+};
 
 const SoundCollection = () => {
   const [recordings, setRecordings] = useState([]);
   const [isRecording, setIsRecording] = useState(false);
-  const [mediaRecorder, setMediaRecorder] = useState(null);
+  const [isSaving, setIsSaving] = useState(false);
   const [currentRecording, setCurrentRecording] = useState(null);
+  const [isDraftRestored, setIsDraftRestored] = useState(false);
   const fileInputRef = useRef(null);
   const recordButtonRef = useRef(null);
+
+  // 非同期処理やアンマウント時の後片付けで最新の値を参照するための ref
+  const mediaRecorderRef = useRef(null);
+  const streamRef = useRef(null);
+  const isStartingRef = useRef(false);
+  const isMountedRef = useRef(true);
+  const objectUrlsRef = useRef(new Set());
+  const savingUrlRef = useRef(null); // 保存中の音の URL（解放しない）
+  const savedUrlsRef = useRef(new Set()); // 「最近録音した音」で使っている URL（解放しない）
+  const currentRecordingRef = useRef(currentRecording);
+  currentRecordingRef.current = currentRecording;
+  const editorFieldsRef = useRef(null); // 編集中の名前・タグ（ページを離れるときに覚えておくため）
 
   // アクセシビリティフック
   const { announce, AnnouncementRegion } = useAnnouncement();
   const { showError, clearError, ErrorRegion } = useErrorMessages();
 
-  // コンポーネントアンマウント時のクリーンアップ
+  // アンマウント時だけ後片付けする。
+  // （以前は録音一覧が変わるたびに実行され、表示中の音の URL まで解放して再生できなくなっていた）
   useEffect(() => {
+    isMountedRef.current = true;
+    const objectUrls = objectUrlsRef.current;
+    const savedUrls = savedUrlsRef.current;
+
+    // 前にこのページを離れたときの、保存していない音を戻す（URL は下の effect で描画後に作る）
+    const draft = takeUnsavedDraft();
+    if (draft) {
+      setCurrentRecording({ ...draft, url: null });
+      setIsDraftRestored(true);
+    }
+
     return () => {
-      // 録音中の場合は停止
-      if (mediaRecorder && isRecording) {
-        mediaRecorder.stop();
-        if (mediaRecorder.stream) {
-          mediaRecorder.stream.getTracks().forEach(track => track.stop());
+      isMountedRef.current = false;
+      const unsaved = currentRecordingRef.current;
+      if (unsaved && unsaved.audioBlob && unsaved.url !== savingUrlRef.current && !savedUrls.has(unsaved.url)) {
+        const fields = editorFieldsRef.current || {};
+        keepUnsavedDraft({
+          audioBlob: unsaved.audioBlob,
+          name: fields.name !== undefined ? fields.name : unsaved.name || '',
+          tags: fields.tags || unsaved.tags || [],
+          createdAt: unsaved.createdAt
+        });
+      }
+      const recorder = mediaRecorderRef.current;
+      mediaRecorderRef.current = null;
+      if (recorder && recorder.state !== 'inactive') {
+        try {
+          recorder.stop();
+        } catch (error) {
+          // 既に停止している
         }
       }
-      
-      // 作成されたBlobURLをクリーンアップ
-      recordings.forEach(recording => {
-        if (recording.url && recording.url.startsWith('blob:')) {
-          URL.revokeObjectURL(recording.url);
-        }
-      });
+      stopStream(streamRef.current);
+      streamRef.current = null;
+      objectUrls.forEach(url => URL.revokeObjectURL(url));
+      objectUrls.clear();
     };
-  }, [mediaRecorder, isRecording, recordings]);
+  }, []);
+
+  // 復元した音の再生用 URL を作る。
+  // マウント時の effect の中で作ると、開発時の StrictMode の二重実行で後片付けに解放されてしまう。
+  useEffect(() => {
+    if (currentRecording && !currentRecording.url && currentRecording.audioBlob) {
+      const url = URL.createObjectURL(currentRecording.audioBlob);
+      objectUrlsRef.current.add(url);
+      setCurrentRecording((prev) => (prev === currentRecording ? { ...prev, url } : prev));
+    }
+  }, [currentRecording]);
+
+  const createObjectUrl = (blob) => {
+    const url = URL.createObjectURL(blob);
+    objectUrlsRef.current.add(url);
+    return url;
+  };
+
+  const releaseObjectUrl = (url) => {
+    if (url && objectUrlsRef.current.has(url)) {
+      URL.revokeObjectURL(url);
+      objectUrlsRef.current.delete(url);
+    }
+  };
+
+  // 保存していない音を捨ててよいか確認する（保存中の音は一覧に残るので確認しない）
+  const confirmDiscardUnsaved = () => {
+    const current = currentRecordingRef.current;
+    if (!current || current.url === savingUrlRef.current) return true;
+    return window.confirm(DISCARD_CONFIRM_MESSAGE);
+  };
+
+  // 編集中の音を差し替える（保存しなかった前の音の URL は解放する。保存中の音は一覧で使うので残す）
+  // （setState の更新関数は次の描画のときに実行されるので、その時点の保存状況で判定する）
+  const replaceCurrentRecording = (next) => {
+    setIsDraftRestored(false);
+    setCurrentRecording(prev => {
+      const isInUse = prev && (prev.url === savingUrlRef.current || savedUrlsRef.current.has(prev.url));
+      if (prev && prev.url && (!next || prev.url !== next.url) && !isInUse) {
+        releaseObjectUrl(prev.url);
+      }
+      return next;
+    });
+  };
+
+  // 録音できる環境かどうかを確認し、問題があればメッセージを返す
+  const getRecordingSupportError = async () => {
+    if (!isSecureOrigin()) {
+      return '録音機能を使用するにはHTTPS接続（https:// で始まるアドレス）が必要です。';
+    }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof MediaRecorder === 'undefined') {
+      return 'お使いのブラウザは録音機能をサポートしていません。iPadの場合は iPadOS 14.5 以降の Safari をお使いください。';
+    }
+    if (navigator.permissions && navigator.permissions.query) {
+      try {
+        const permission = await navigator.permissions.query({ name: 'microphone' });
+        if (permission && permission.state === 'denied') {
+          return getMicrophoneErrorMessage({ name: 'NotAllowedError' });
+        }
+      } catch (permError) {
+        // Safari 15 以前は microphone の問い合わせに対応していない
+      }
+    }
+    return null;
+  };
+
+  const reportError = (message) => {
+    showError(message);
+    announce(message, 'assertive');
+  };
 
   const startRecording = async () => {
+    // 連打で録音が二重に始まらないようにする
+    if (isStartingRef.current || mediaRecorderRef.current) return;
+    if (!confirmDiscardUnsaved()) return;
+    isStartingRef.current = true;
+
     try {
-      // エラーメッセージをクリア
       clearError();
       announce('録音を開始しています...', 'assertive');
 
-      // iOSでのマイクアクセス改善 - まずテストを実行
-      const hasAccess = await testMicrophoneAccess();
-      if (!hasAccess) {
-        showError('マイクにアクセスできませんでした。ブラウザの設定を確認してください。');
+      const supportError = await getRecordingSupportError();
+      if (supportError) {
+        reportError(supportError);
         return;
       }
 
-      
-      // iPad用の音声設定を最適化
-      const audioConstraints = {
-        echoCancellation: false, // iPadでは無効にする
-        noiseSuppression: false, // iPadでは無効にする  
-        autoGainControl: false,  // iPadでは無効にする
-        sampleRate: 44100,       // 明示的にサンプルレートを指定
-        channelCount: 1          // モノラル録音を明示
-      };
-      
-      
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        audio: audioConstraints
-      });
-      
-      
-      // MediaRecorderのオプションを決定
-      let recorderOptions = {};
-      
-      if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
-        recorderOptions.mimeType = 'audio/webm;codecs=opus';
-      } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
-        recorderOptions.mimeType = 'audio/mp4';
-      } else if (MediaRecorder.isTypeSupported('audio/wav')) {
-        recorderOptions.mimeType = 'audio/wav';
-      } else {
+      let stream;
+      try {
+        // マイクの取得は 1 回だけにする（取得→停止→再取得すると一部の iPad で無音になる）
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false,
+            channelCount: 1
+          }
+        });
+      } catch (error) {
+        console.error('マイクの取得に失敗しました:', error);
+        reportError(getMicrophoneErrorMessage(error));
+        return;
       }
-      
-      const recorder = new MediaRecorder(stream, recorderOptions);
-      
-      const chunks = [];
 
+      if (!isMountedRef.current) {
+        stopStream(stream);
+        return;
+      }
+
+      const mimeType = getSupportedRecordingMimeType();
+      let recorder;
+      try {
+        recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      } catch (error) {
+        try {
+          recorder = new MediaRecorder(stream);
+        } catch (fallbackError) {
+          console.error('MediaRecorder を作成できませんでした:', fallbackError);
+          stopStream(stream);
+          reportError(getMicrophoneErrorMessage({ name: 'NotSupportedError' }));
+          return;
+        }
+      }
+
+      const chunks = [];
       recorder.ondataavailable = (e) => {
-        chunks.push(e.data);
+        if (e.data && e.data.size > 0) {
+          chunks.push(e.data);
+        }
       };
 
       recorder.onstop = () => {
-        const blob = new Blob(chunks, { type: 'audio/wav' });
-        const url = URL.createObjectURL(blob);
-        setCurrentRecording({
-          id: Date.now(),
-          url: url,
+        stopStream(stream);
+        if (streamRef.current === stream) streamRef.current = null;
+        if (mediaRecorderRef.current === recorder) mediaRecorderRef.current = null;
+
+        // 実際の録音形式で Blob を作る（常に audio/wav と表記すると iPad で再生できなくなる）
+        const type = recorder.mimeType || (chunks[0] && chunks[0].type) || mimeType || 'audio/mp4';
+        const blob = new Blob(chunks, { type });
+
+        if (!isMountedRef.current) {
+          // 録音中にほかのページへ移動した: 戻ってきたときに保存できるよう覚えておく
+          if (blob.size > 0) {
+            keepUnsavedDraft({ audioBlob: blob, name: '', tags: [], createdAt: new Date().toISOString() });
+          }
+          return;
+        }
+        // マイクが切断されたなどで自動的に止まった場合も「録音中」の表示を戻す
+        setIsRecording(false);
+
+        if (blob.size === 0) {
+          reportError('録音データが空でした。もう一度録音してください。');
+          return;
+        }
+
+        replaceCurrentRecording({
+          url: createObjectUrl(blob),
           audioBlob: blob,
           name: '',
           tags: [],
-          createdAt: new Date()
+          createdAt: new Date().toISOString()
         });
-        
+
         announce('録音が完了しました。音に名前をつけて保存してください。', 'assertive');
       };
 
-      recorder.start();
-      setMediaRecorder(recorder);
+      recorder.onerror = (event) => {
+        console.error('録音中にエラーが発生しました:', event && event.error);
+        reportError('録音中にエラーが発生しました。もう一度お試しください。');
+      };
+
+      try {
+        recorder.start();
+      } catch (error) {
+        console.error('録音の開始に失敗しました:', error);
+        stopStream(stream);
+        reportError(getMicrophoneErrorMessage(error));
+        return;
+      }
+
+      mediaRecorderRef.current = recorder;
+      streamRef.current = stream;
       setIsRecording(true);
       announce('録音を開始しました。', 'assertive');
-      
-    } catch (error) {
-      console.error('録音の開始に失敗しました:', error);
-      
-      let errorMessage = '録音を開始できませんでした。';
-      
-      if (error.name === 'NotAllowedError') {
-        errorMessage = 'マイクの使用が拒否されました。ブラウザの設定でマイクアクセスを許可してください。';
-      } else if (error.name === 'NotFoundError') {
-        errorMessage = 'マイクが見つかりません。デバイスにマイクが接続されているか確認してください。';
-      } else if (error.name === 'NotSupportedError') {
-        errorMessage = 'お使いのブラウザは録音機能をサポートしていません。';
-      } else if (error.name === 'NotReadableError') {
-        errorMessage = 'マイクが他のアプリケーションで使用中の可能性があります。';
-      } else if (error.message) {
-        errorMessage = error.message;
-      }
-      
-      showError(errorMessage);
-      announce(errorMessage, 'assertive');
+    } finally {
+      isStartingRef.current = false;
     }
   };
 
   const stopRecording = () => {
     setIsRecording(false); // まず録音状態を停止に設定
-    
-    if (mediaRecorder) {
-      mediaRecorder.stop();
-      mediaRecorder.stream.getTracks().forEach(track => track.stop());
-      setMediaRecorder(null);
-      announce('録音を停止しました。', 'assertive');
+
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== 'inactive') {
+      try {
+        // マイクは onstop で止める（先に止めると最後の音が欠けることがある）
+        recorder.stop();
+      } catch (error) {
+        console.error('録音の停止に失敗しました:', error);
+        stopStream(streamRef.current);
+        mediaRecorderRef.current = null;
+      }
+    } else {
+      stopStream(streamRef.current);
+      mediaRecorderRef.current = null;
     }
-    
+    announce('録音を停止しました。', 'assertive');
   };
 
-  // Blobを Base64 に変換する関数
-  const blobToBase64 = (blob) => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
+  const saveToLegacyStorage = (record) => {
+    const existing = JSON.parse(localStorage.getItem(LEGACY_RECORDINGS_KEY) || '[]');
+    localStorage.setItem(LEGACY_RECORDINGS_KEY, JSON.stringify([...existing, record]));
   };
 
   const saveRecording = async (name, tags) => {
-    if (currentRecording && name.trim()) {
-      try {
-        // Blobをbase64に変換
-        const base64Data = await blobToBase64(currentRecording.audioBlob);
-        
-        const savedRecording = {
-          ...currentRecording,
-          name: name.trim(),
-          tags: tags.filter(tag => tag.trim()).map(tag => tag.trim()),
-          audioData: base64Data, // base64データを保存
-          createdAt: currentRecording.createdAt || new Date().toISOString(),
-          // audioBlobは一時的なものなので削除
-          audioBlob: undefined
-        };
-        
-        setRecordings([...recordings, savedRecording]);
-        setCurrentRecording(null);
-        
-        // IndexedDBに保存
-        try {
-          await saveRecordingToDB(savedRecording);
-          console.log('✓ Recording saved to IndexedDB');
-        } catch (dbError) {
-          console.error('IndexedDB保存エラー、localStorageにフォールバック:', dbError);
-          // フォールバック: localStorageに保存
-          const existingRecordings = JSON.parse(localStorage.getItem('soundRecordings') || '[]');
-          const recordingToSave = { ...savedRecording };
-          delete recordingToSave.audioBlob; // Blobは保存しない
-          localStorage.setItem('soundRecordings', JSON.stringify([...existingRecordings, recordingToSave]));
-        }
-      } catch (error) {
-        console.error('録音の保存に失敗しました:', error);
-        alert('録音の保存に失敗しました。再度お試しください。');
-      }
-    }
-  };
+    const target = currentRecording;
+    if (!target || !target.url || !name.trim() || isSaving) return;
 
-  const handleFileUpload = (event) => {
-    const file = event.target.files[0];
-    if (file && file.type.startsWith('audio/')) {
-      const url = URL.createObjectURL(file);
-      setCurrentRecording({
-        id: Date.now(),
-        url: url,
-        audioBlob: file,
-        name: file.name.replace(/\.[^/.]+$/, ''),
-        tags: [],
-        createdAt: new Date()
-      });
-    }
-  };
-
-  // マイクアクセステスト機能（iOSでの問題対策）
-  const testMicrophoneAccess = async () => {
+    setIsSaving(true);
+    savingUrlRef.current = target.url;
+    clearError();
     try {
-      
-      // HTTPS接続チェック
-      if (!checkHTTPS()) {
-        alert('🔒 録音機能を使用するにはHTTPS接続が必要です。\n\niPhoneでは特に、セキュアな接続が必要となります。');
-        return false;
-      }
-      
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error('お使いのブラウザは録音機能をサポートしていません。');
+      const record = {
+        name: name.trim(),
+        tags: tags.map(tag => tag.trim()).filter(Boolean),
+        audioData: await blobToAudioDataUrl(target.audioBlob),
+        createdAt: target.createdAt || new Date().toISOString()
+      };
+
+      let id;
+      try {
+        id = await addRecording(record);
+      } catch (dbError) {
+        if (isQuotaExceededError(dbError)) throw dbError;
+        console.error('IndexedDB保存エラー、localStorageにフォールバック:', dbError);
+        // 次回の読み込み時に IndexedDB へ移行される
+        saveToLegacyStorage(record);
+        id = `local-${Date.now()}`;
       }
 
-      // まずマイクの権限状態を確認
-      if (navigator.permissions) {
-        try {
-          const permission = await navigator.permissions.query({ name: 'microphone' });
-          
-          if (permission.state === 'denied') {
-            alert('マイクアクセスが拒否されています。ブラウザの設定からマイクの使用を許可してください。');
-            return false;
-          }
-        } catch (permError) {
-        }
-      }
-
-      // 実際にマイクアクセスをテスト
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
-        }
-      });
-      
-      // すぐにストリームを停止
-      stream.getTracks().forEach(track => track.stop());
-      return true;
-      
+      // 保存が確定してから一覧に出す（保存できていないのに保存済みに見えるのを防ぐ）
+      requestPersistentStorage();
+      savedUrlsRef.current.add(target.url);
+      if (!isMountedRef.current) return;
+      setRecordings(prev => [...prev, { ...record, id, url: target.url }]);
+      // 保存中に次の録音が始まって編集中の音が変わっていたら、そちらは残す
+      setCurrentRecording(prev => (prev && prev.url === target.url ? null : prev));
+      setIsDraftRestored(false);
+      announce(`「${record.name}」を保存しました。`, 'polite');
     } catch (error) {
-      console.error('マイクアクセステスト失敗:', error);
-      
-      let errorMessage = 'マイクにアクセスできません。';
-      
-      if (error.name === 'NotAllowedError') {
-        errorMessage = 'マイクの使用が拒否されました。ブラウザの設定でマイクアクセスを許可してください。\n\niPhoneの場合：\n1. Safari設定 > プライバシーとセキュリティ > マイク\n2. このサイトを許可に設定';
-      } else if (error.name === 'NotFoundError') {
-        errorMessage = 'マイクが見つかりません。';
-      } else if (error.name === 'NotSupportedError') {
-        errorMessage = 'お使いのブラウザは録音機能をサポートしていません。';
-      } else if (error.message) {
-        errorMessage = error.message;
+      console.error('録音の保存に失敗しました:', error);
+      if (!isMountedRef.current) {
+        // 保存中にほかのページへ移動して保存に失敗した: 戻ってきたときにもう一度保存できるようにする
+        keepUnsavedDraft({ audioBlob: target.audioBlob, name: name.trim(), tags, createdAt: target.createdAt });
+        return;
       }
-      
-      alert(errorMessage);
-      return false;
+      reportError(isQuotaExceededError(error)
+        ? '保存できる容量が足りません。音ライブラリで使わない音を削除してから、もう一度保存してください。'
+        : '録音の保存に失敗しました。もう一度「保存」を押してください。');
+    } finally {
+      savingUrlRef.current = null;
+      if (isMountedRef.current) setIsSaving(false);
     }
   };
 
-  // HTTPS接続チェック（iOSでの録音に必要）
-  const checkHTTPS = () => {
-    if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-      return false;
+  const handleFileUpload = async (event) => {
+    const input = event.target;
+    const file = input.files && input.files[0];
+    // 同じファイルをもう一度選んでも反応するようにリセットする
+    input.value = '';
+    if (!file) return;
+
+    if (!isAudioFile(file)) {
+      reportError('音声ファイルを選択してください。対応形式: MP3, WAV, M4A など');
+      return;
     }
-    return true;
+    if (!confirmDiscardUnsaved()) return;
+    clearError();
+
+    let blob = file;
+    try {
+      // iPad では file.type が空や誤っていることがあるので中身から判定し直す
+      blob = await withDetectedMimeType(file);
+    } catch (error) {
+      console.warn('ファイル形式の判定に失敗しました:', error);
+    }
+    if (!isMountedRef.current) return;
+
+    replaceCurrentRecording({
+      url: createObjectUrl(blob),
+      audioBlob: blob,
+      name: file.name.replace(/\.[^/.]+$/, ''),
+      tags: [],
+      createdAt: new Date().toISOString()
+    });
   };
 
   // 音声レベル監視関数
@@ -274,7 +418,7 @@ const SoundCollection = () => {
     <div className="sound-collection">
       <header>
         <h2 id="page-title">
-          <span role="img" aria-label="マイク">🎤</span> 音あつめページ
+          <Icon icon={Mic} label="マイク" /> 音あつめページ
         </h2>
         <p className="page-description">
           身の回りにある音を録音したり、音ファイルをアップロードして音素材を集めましょう！
@@ -290,18 +434,18 @@ const SoundCollection = () => {
         
         <section className="recording-section card" aria-labelledby="recording-title">
           <h3 id="recording-title">
-            <span role="img" aria-label="マイク">🎙️</span> 音を録音する
+            <Icon icon={Mic} label="マイク" /> 音を録音する
           </h3>
           
           {/* iOS用の説明 */}
           <div className="ios-notice" role="region" aria-labelledby="ios-instructions">
             <h4 id="ios-instructions" className="sr-only">iPhone/iPad使用時の注意事項</h4>
             <p>
-              <span role="img" aria-label="スマートフォン">📱</span> 
+              <Icon icon={TabletSmartphone} label="スマートフォン" /> 
               <strong>iPhone/iPadをお使いの方へ：</strong>
             </p>
             <p>録音ボタンを押すとマイクの使用許可を求めるダイアログが表示されます。「許可」を選択してください。</p>
-            <p>ダイアログが表示されない場合は、Safari設定 → プライバシーとセキュリティ → マイク でこのサイトを許可してください。</p>
+            <p>ダイアログが表示されない場合は、「設定」アプリ →「Safari」→「マイク」を「確認」か「許可」にしてください。</p>
           </div>
           
           <div className="recording-controls" role="group" aria-labelledby="recording-controls-label">
@@ -313,8 +457,9 @@ const SoundCollection = () => {
                 onClick={startRecording}
                 aria-describedby="record-instructions"
                 type="button"
+                disabled={isSaving}
               >
-                <span role="img" aria-label="録音開始">🔴</span> 録音開始
+                <Icon icon={Circle} label="録音開始" fill="currentColor" /> 録音開始
               </button>
             ) : (
               <button 
@@ -323,7 +468,7 @@ const SoundCollection = () => {
                 aria-describedby="stop-instructions"
                 type="button"
               >
-                <span role="img" aria-label="停止">⏹️</span> 録音停止
+                <Icon icon={Square} label="停止" fill="currentColor" /> 録音停止
               </button>
             )}
             <div id="record-instructions" className="sr-only">
@@ -351,15 +496,16 @@ const SoundCollection = () => {
 
         <section className="upload-section card" aria-labelledby="upload-title">
           <h3 id="upload-title">
-            <span role="img" aria-label="フォルダ">📁</span> 音ファイルをアップロード
+            <Icon icon={FolderOpen} label="フォルダ" /> 音ファイルをアップロード
           </h3>
           <button 
             className="accessible-button button-secondary large-button"
             onClick={() => fileInputRef.current?.click()}
             aria-describedby="upload-instructions"
             type="button"
+            disabled={isSaving}
           >
-            <span role="img" aria-label="ファイル選択">📂</span> ファイルを選択
+            <Icon icon={FileAudio} label="ファイル選択" /> ファイルを選択
           </button>
           <div id="upload-instructions" className="sr-only">
             音声ファイルを選択してアップロードできます。対応形式: MP3, WAV, M4A など
@@ -377,15 +523,19 @@ const SoundCollection = () => {
 
       {currentRecording && (
         <RecordingEditor 
+          key={currentRecording.url}
+          isDraftRestored={isDraftRestored}
+          onFieldsChange={(fields) => { editorFieldsRef.current = fields; }}
           recording={currentRecording}
           onSave={saveRecording}
-          onCancel={() => setCurrentRecording(null)}
+          onCancel={() => replaceCurrentRecording(null)}
+          isSaving={isSaving}
         />
       )}
 
       <section className="recent-recordings" aria-labelledby="recent-title">
         <h3 id="recent-title">
-          <span role="img" aria-label="メモ">📝</span> 最近録音した音
+          <Icon icon={ListMusic} label="メモ" /> 最近録音した音
         </h3>
         {recordings.length === 0 ? (
           <p className="no-recordings">まだ録音した音がありません。上の録音ボタンから始めましょう！</p>
@@ -409,11 +559,16 @@ const SoundCollection = () => {
   );
 };
 
-const RecordingEditor = ({ recording, onSave, onCancel }) => {
+const RecordingEditor = ({ recording, onSave, onCancel, onFieldsChange, isSaving = false, isDraftRestored = false }) => {
   const [name, setName] = useState(recording.name);
   const [tagInput, setTagInput] = useState('');
   const [tags, setTags] = useState(recording.tags);
   const [validationMessage, setValidationMessage] = useState('');
+
+  // 入力途中の名前・タグを親に伝える（ページを離れても戻ったときに続きから書けるように）
+  useEffect(() => {
+    if (onFieldsChange) onFieldsChange({ name, tags });
+  }, [name, tags, onFieldsChange]);
 
   const addTag = () => {
     if (tagInput.trim() && !tags.includes(tagInput.trim())) {
@@ -430,8 +585,8 @@ const RecordingEditor = ({ recording, onSave, onCancel }) => {
     setValidationMessage(`タグ「${tagToRemove}」を削除しました`);
   };
 
-  const handleKeyPress = (e) => {
-    if (e.key === 'Enter') {
+  const handleKeyDown = (e) => {
+    if (isEnterKey(e)) {
       e.preventDefault();
       addTag();
     }
@@ -453,11 +608,16 @@ const RecordingEditor = ({ recording, onSave, onCancel }) => {
       aria-describedby="editor-description"
     >
       <h3 id="editor-title">
-        <span role="img" aria-label="編集">✏️</span> 音に名前をつけよう
+        <Icon icon={Pencil} label="編集" /> 音に名前をつけよう
       </h3>
       <p id="editor-description" className="sr-only">
         録音した音に名前とタグをつけて保存できます
       </p>
+      {isDraftRestored && (
+        <p className="draft-restored-notice" role="status">
+          前に録音した音がまだ保存されていません。名前をつけて保存してください。
+        </p>
+      )}
       
       <div className="audio-preview-container">
         <label htmlFor="audio-preview" className="audio-preview-label">録音した音のプレビュー:</label>
@@ -470,12 +630,6 @@ const RecordingEditor = ({ recording, onSave, onCancel }) => {
           playsInline
           onError={(e) => {
             console.error('音声プレビューの読み込みエラー:', e);
-          }}
-          onLoadStart={() => {
-            console.log('🎵 Loading preview audio');
-          }}
-          onCanPlay={() => {
-            console.log('✓ Preview audio can play');
           }}
           aria-describedby="audio-preview-desc"
         >
@@ -520,7 +674,7 @@ const RecordingEditor = ({ recording, onSave, onCancel }) => {
             type="text"
             value={tagInput}
             onChange={(e) => setTagInput(e.target.value)}
-            onKeyPress={handleKeyPress}
+            onKeyDown={handleKeyDown}
             placeholder="例: 楽器、自然"
             className="accessible-input tag-input"
             aria-describedby="tag-help"
@@ -560,11 +714,11 @@ const RecordingEditor = ({ recording, onSave, onCancel }) => {
                     {tag}
                     <button 
                       onClick={() => removeTag(tag)} 
-                      className="remove-tag"
+                      className="remove-tag touch-target-expand"
                       type="button"
                       aria-label={`タグ「${tag}」を削除`}
                     >
-                      <span aria-hidden="true">×</span>
+                      <Icon icon={X} size={14} />
                     </button>
                   </span>
                 </li>
@@ -589,19 +743,20 @@ const RecordingEditor = ({ recording, onSave, onCancel }) => {
         <button 
           onClick={handleSave}
           className="accessible-button button-primary"
-          disabled={!name.trim()}
+          disabled={!name.trim() || isSaving}
           type="button"
           aria-describedby="save-help"
         >
-          <span role="img" aria-label="保存">💾</span> 保存
+          <Icon icon={Save} label="保存" /> {isSaving ? '保存中...' : '保存'}
         </button>
         <button 
           onClick={onCancel} 
           className="accessible-button button-secondary"
           type="button"
+          disabled={isSaving}
           aria-describedby="cancel-help"
         >
-          <span role="img" aria-label="キャンセル">❌</span> キャンセル
+          <Icon icon={X} label="キャンセル" /> キャンセル
         </button>
         <p id="save-help" className="sr-only">
           音の名前とタグを保存します
@@ -635,7 +790,7 @@ const SoundCard = ({ recording, index }) => {
         <p className="sound-date" aria-label={`録音日: ${formattedDate}`}>
           {formattedDate}
         </p>
-        {recording.tags.length > 0 && (
+        {(recording.tags || []).length > 0 && (
           <div className="sound-tags" role="group" aria-label="タグ">
             {recording.tags.map((tag, tagIndex) => (
               <span 
@@ -664,12 +819,6 @@ const SoundCard = ({ recording, index }) => {
           playsInline
           onError={(e) => {
             console.error('音声カードの読み込みエラー:', e, 'recording:', recording.name);
-          }}
-          onLoadStart={() => {
-            console.log('🎵 Loading audio:', recording.name);
-          }}
-          onCanPlay={() => {
-            console.log('✓ Audio can play:', recording.name);
           }}
           aria-describedby={`audio-desc-${recording.id}`}
         >

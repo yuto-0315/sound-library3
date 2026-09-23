@@ -44,7 +44,8 @@
 - **ルーティング**: React Router DOM
 - **スタイリング**: CSS3 (カスタムCSS)
 - **音声処理**: Web Audio API, MediaRecorder API
-- **データ保存**: LocalStorage + MySQL（クラウド機能）
+- **データ保存**: IndexedDB（録音した音・音楽づくりの自動保存） + MySQL（クラウド機能）
+- **アイコン**: lucide-react
 
 ### バックエンド（新規追加）
 - **サーバー**: PHP 7.4+
@@ -79,7 +80,7 @@
 - TalkBack（Android）
 - 音声認識ソフトウェア
 
-詳細は [アクセシビリティガイド](docs/ACCESSIBILITY.md) をご覧ください。
+アクセシビリティのテストについては [TEST_DOCUMENTATION.md](TEST_DOCUMENTATION.md) の「アクセシビリティテスト」をご覧ください。
 
 ## 開発環境のセットアップ
 
@@ -92,7 +93,7 @@
 1. リポジトリのクローン
 ```bash
 git clone <repository-url>
-cd sound-library2
+cd sound-library3
 ```
 
 2. 依存関係のインストール
@@ -107,12 +108,18 @@ npm start
 
 4. ブラウザで http://localhost:3000 にアクセス
 
+クラウド機能（みんなで共有・クラウド保存・先生用ページ）を試すときは、XAMPP で PHP の API も動かしておきます。
+開発サーバーは `/api` へのアクセスを `http://localhost/sound-library3/api` に中継します（`src/setupProxy.js`）。
+手順と中継先の変え方は [SETUP.md](SETUP.md) の「5.3 開発サーバーから API を使う」をご覧ください。
+
 ## ビルド
 
 本番用のビルドを作成:
 ```bash
 npm run build
 ```
+
+公開用のビルドは `docs/` に置いています。`npm run deploy` は、ビルドして `docs/` を作り直し、main にコミットして push します。
 
 ## 使用方法
 
@@ -188,10 +195,36 @@ npm run test:hooks
 
 ### テスト構成
 
-- **コンポーネントテスト**: App, Navigation, SoundCollection, SoundLibrary, DAWPage
-- **カスタムフックテスト**: useAccessibility関連フック
+- **コンポーネントテスト**: App, Navigation, SoundCollection, SoundLibrary, DAWPage, CloudPage, AdminPage
+- **データ保存の回帰テスト**: `DAWPage.persistence.test.js`（ページ移動・再読み込みで作業内容が消えないこと など）
+- **ユーティリティのテスト**: `src/__tests__/utils/`（音声形式の判定、IndexedDB、プロジェクトの保存形式）
+- **カスタムフックテスト**: useAccessibility, useTouchDrag
 - **アクセシビリティテスト**: WAI-ARIA準拠、キーボードナビゲーション
-- **統合テスト**: ルーティング、LocalStorage連携
+- テスト用の道具は `src/test-utils/` にある（インメモリの IndexedDB、Web Audio のモックなど）
+
+### ブラウザでの E2E テスト（Playwright）
+
+本物の IndexedDB・録音・Web Audio を使って、主要な操作とデータが消えないことを確認します。
+
+```bash
+npm run build
+npm run start:static
+```
+
+別のターミナルで:
+
+```bash
+npx playwright test --config=playwright.config.js stability.spec.js
+```
+
+- 配信先を変えるときは `E2E_BASE_URL`、インストール済みの Chromium を使うときは `E2E_CHROMIUM_PATH` を指定します
+- マイクの代わりに 440Hz の音を録音します（録音処理そのものは本物のブラウザで動きます）
+
+### サーバー側（PHP）のテスト
+
+```bash
+php tests/php/audio_utils_test.php
+```
 
 ### テストカバレッジ
 

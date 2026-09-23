@@ -1,6 +1,6 @@
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { BrowserRouter, MemoryRouter } from 'react-router-dom';
+import { MemoryRouter } from 'react-router-dom';
 import '@testing-library/jest-dom';
 import Navigation from '../components/Navigation';
 
@@ -102,11 +102,44 @@ describe('Navigation Component', () => {
     
     // 全てのメニューアイテムが正しいroleを持つ
     const menuItems = screen.getAllByRole('menuitem');
-    expect(menuItems).toHaveLength(3);
+    expect(menuItems).toHaveLength(4); // 音あつめ・音ライブラリ・音楽づくり・みんなで共有
     
     menuItems.forEach(item => {
       expect(item).toHaveAttribute('role', 'menuitem');
     });
+  });
+
+  test('Tab で止まるのは 1 項目だけで、今のページの項目に止まる（roving tabindex）', () => {
+    renderWithRouter(<Navigation />, { initialEntries: ['/daw'] });
+    const menuItems = screen.getAllByRole('menuitem');
+    expect(menuItems.map((item) => item.getAttribute('tabindex'))).toEqual(['-1', '-1', '0', '-1']);
+  });
+
+  test('矢印キー・Home・End でメニュー項目を移動できる', () => {
+    renderWithRouter(<Navigation />);
+    const menuItems = screen.getAllByRole('menuitem');
+    menuItems[0].focus();
+    fireEvent.keyDown(menuItems[0], { key: 'ArrowRight' });
+    expect(menuItems[1]).toHaveFocus();
+    expect(menuItems[1]).toHaveAttribute('tabindex', '0');
+    expect(menuItems[0]).toHaveAttribute('tabindex', '-1');
+    fireEvent.keyDown(menuItems[1], { key: 'ArrowLeft' });
+    expect(menuItems[0]).toHaveFocus();
+    fireEvent.keyDown(menuItems[0], { key: 'ArrowLeft' });
+    expect(menuItems[3]).toHaveFocus(); // 端から反対側へ回る
+    fireEvent.keyDown(menuItems[3], { key: 'Home' });
+    expect(menuItems[0]).toHaveFocus();
+    fireEvent.keyDown(menuItems[0], { key: 'End' });
+    expect(menuItems[3]).toHaveFocus();
+  });
+
+  test('スペースキーでもページを開ける', () => {
+    renderWithRouter(<Navigation />);
+    const library = screen.getByRole('menuitem', { name: /音ライブラリ/ });
+    const click = jest.fn();
+    library.addEventListener('click', click);
+    fireEvent.keyDown(library, { key: ' ' });
+    expect(click).toHaveBeenCalled();
   });
 
   test('displays emoji icons correctly', () => {

@@ -1,5 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { Circle, FileAudio, FolderOpen, ListMusic, Mic, Pencil, Save, Square, TabletSmartphone, X } from 'lucide-react';
 import './SoundCollection.css';
+import Icon from '../components/Icon';
 import { useAnnouncement, useErrorMessages } from '../hooks/useAccessibility';
 import { addRecording, isQuotaExceededError, requestPersistentStorage } from '../utils/indexedDB';
 import {
@@ -32,7 +34,7 @@ const getMicrophoneErrorMessage = (error) => {
   switch (error && error.name) {
     case 'NotAllowedError':
     case 'SecurityError':
-      return 'マイクの使用が拒否されました。ブラウザの設定でマイクアクセスを許可してください。（iPad: 設定 → Safari → マイク）';
+      return 'マイクの使用が拒否されました。iPad の「設定」アプリ →「Safari」→「マイク」を「確認」か「許可」にしてから、もう一度お試しください。';
     case 'NotFoundError':
     case 'OverconstrainedError':
       return 'マイクが見つかりません。デバイスにマイクが接続されているか確認してください。';
@@ -114,7 +116,7 @@ const SoundCollection = () => {
   // 録音できる環境かどうかを確認し、問題があればメッセージを返す
   const getRecordingSupportError = async () => {
     if (!isSecureOrigin()) {
-      return '🔒 録音機能を使用するにはHTTPS接続が必要です。';
+      return '録音機能を使用するにはHTTPS接続（https:// で始まるアドレス）が必要です。';
     }
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof MediaRecorder === 'undefined') {
       return 'お使いのブラウザは録音機能をサポートしていません。iPadの場合は iPadOS 14.3 以降の Safari をお使いください。';
@@ -347,7 +349,7 @@ const SoundCollection = () => {
     <div className="sound-collection">
       <header>
         <h2 id="page-title">
-          <span role="img" aria-label="マイク">🎤</span> 音あつめページ
+          <Icon icon={Mic} label="マイク" /> 音あつめページ
         </h2>
         <p className="page-description">
           身の回りにある音を録音したり、音ファイルをアップロードして音素材を集めましょう！
@@ -363,18 +365,18 @@ const SoundCollection = () => {
         
         <section className="recording-section card" aria-labelledby="recording-title">
           <h3 id="recording-title">
-            <span role="img" aria-label="マイク">🎙️</span> 音を録音する
+            <Icon icon={Mic} label="マイク" /> 音を録音する
           </h3>
           
           {/* iOS用の説明 */}
           <div className="ios-notice" role="region" aria-labelledby="ios-instructions">
             <h4 id="ios-instructions" className="sr-only">iPhone/iPad使用時の注意事項</h4>
             <p>
-              <span role="img" aria-label="スマートフォン">📱</span> 
+              <Icon icon={TabletSmartphone} label="スマートフォン" /> 
               <strong>iPhone/iPadをお使いの方へ：</strong>
             </p>
             <p>録音ボタンを押すとマイクの使用許可を求めるダイアログが表示されます。「許可」を選択してください。</p>
-            <p>ダイアログが表示されない場合は、Safari設定 → プライバシーとセキュリティ → マイク でこのサイトを許可してください。</p>
+            <p>ダイアログが表示されない場合は、「設定」アプリ →「Safari」→「マイク」を「確認」か「許可」にしてください。</p>
           </div>
           
           <div className="recording-controls" role="group" aria-labelledby="recording-controls-label">
@@ -387,7 +389,7 @@ const SoundCollection = () => {
                 aria-describedby="record-instructions"
                 type="button"
               >
-                <span role="img" aria-label="録音開始">🔴</span> 録音開始
+                <Icon icon={Circle} label="録音開始" fill="currentColor" /> 録音開始
               </button>
             ) : (
               <button 
@@ -396,7 +398,7 @@ const SoundCollection = () => {
                 aria-describedby="stop-instructions"
                 type="button"
               >
-                <span role="img" aria-label="停止">⏹️</span> 録音停止
+                <Icon icon={Square} label="停止" fill="currentColor" /> 録音停止
               </button>
             )}
             <div id="record-instructions" className="sr-only">
@@ -424,7 +426,7 @@ const SoundCollection = () => {
 
         <section className="upload-section card" aria-labelledby="upload-title">
           <h3 id="upload-title">
-            <span role="img" aria-label="フォルダ">📁</span> 音ファイルをアップロード
+            <Icon icon={FolderOpen} label="フォルダ" /> 音ファイルをアップロード
           </h3>
           <button 
             className="accessible-button button-secondary large-button"
@@ -432,7 +434,7 @@ const SoundCollection = () => {
             aria-describedby="upload-instructions"
             type="button"
           >
-            <span role="img" aria-label="ファイル選択">📂</span> ファイルを選択
+            <Icon icon={FileAudio} label="ファイル選択" /> ファイルを選択
           </button>
           <div id="upload-instructions" className="sr-only">
             音声ファイルを選択してアップロードできます。対応形式: MP3, WAV, M4A など
@@ -460,7 +462,7 @@ const SoundCollection = () => {
 
       <section className="recent-recordings" aria-labelledby="recent-title">
         <h3 id="recent-title">
-          <span role="img" aria-label="メモ">📝</span> 最近録音した音
+          <Icon icon={ListMusic} label="メモ" /> 最近録音した音
         </h3>
         {recordings.length === 0 ? (
           <p className="no-recordings">まだ録音した音がありません。上の録音ボタンから始めましょう！</p>
@@ -528,7 +530,7 @@ const RecordingEditor = ({ recording, onSave, onCancel, isSaving = false }) => {
       aria-describedby="editor-description"
     >
       <h3 id="editor-title">
-        <span role="img" aria-label="編集">✏️</span> 音に名前をつけよう
+        <Icon icon={Pencil} label="編集" /> 音に名前をつけよう
       </h3>
       <p id="editor-description" className="sr-only">
         録音した音に名前とタグをつけて保存できます
@@ -545,12 +547,6 @@ const RecordingEditor = ({ recording, onSave, onCancel, isSaving = false }) => {
           playsInline
           onError={(e) => {
             console.error('音声プレビューの読み込みエラー:', e);
-          }}
-          onLoadStart={() => {
-            console.log('🎵 Loading preview audio');
-          }}
-          onCanPlay={() => {
-            console.log('✓ Preview audio can play');
           }}
           aria-describedby="audio-preview-desc"
         >
@@ -635,11 +631,11 @@ const RecordingEditor = ({ recording, onSave, onCancel, isSaving = false }) => {
                     {tag}
                     <button 
                       onClick={() => removeTag(tag)} 
-                      className="remove-tag"
+                      className="remove-tag touch-target-expand"
                       type="button"
                       aria-label={`タグ「${tag}」を削除`}
                     >
-                      <span aria-hidden="true">×</span>
+                      <Icon icon={X} size={14} />
                     </button>
                   </span>
                 </li>
@@ -668,7 +664,7 @@ const RecordingEditor = ({ recording, onSave, onCancel, isSaving = false }) => {
           type="button"
           aria-describedby="save-help"
         >
-          <span role="img" aria-label="保存">💾</span> {isSaving ? '保存中...' : '保存'}
+          <Icon icon={Save} label="保存" /> {isSaving ? '保存中...' : '保存'}
         </button>
         <button 
           onClick={onCancel} 
@@ -676,7 +672,7 @@ const RecordingEditor = ({ recording, onSave, onCancel, isSaving = false }) => {
           type="button"
           aria-describedby="cancel-help"
         >
-          <span role="img" aria-label="キャンセル">❌</span> キャンセル
+          <Icon icon={X} label="キャンセル" /> キャンセル
         </button>
         <p id="save-help" className="sr-only">
           音の名前とタグを保存します
@@ -739,12 +735,6 @@ const SoundCard = ({ recording, index }) => {
           playsInline
           onError={(e) => {
             console.error('音声カードの読み込みエラー:', e, 'recording:', recording.name);
-          }}
-          onLoadStart={() => {
-            console.log('🎵 Loading audio:', recording.name);
-          }}
-          onCanPlay={() => {
-            console.log('✓ Audio can play:', recording.name);
           }}
           aria-describedby={`audio-desc-${recording.id}`}
         >

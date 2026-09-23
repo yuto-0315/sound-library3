@@ -1,5 +1,6 @@
 import React from 'react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import SoundLibrary from '../pages/SoundLibrary';
 import * as db from '../utils/indexedDB';
 import { installFakeIndexedDB } from '../test-utils/fakeIndexedDB';
@@ -33,7 +34,7 @@ const cardNames = () => cards().map((card) => card.querySelector('h4').textConte
 const cardFor = (name) => cards().find((card) => card.querySelector('h4').textContent === name);
 
 const renderLibrary = async () => {
-  const utils = render(<SoundLibrary />);
+  const utils = render(<MemoryRouter><SoundLibrary /></MemoryRouter>);
   await waitFor(() => expect(screen.queryByText('読み込み中...')).not.toBeInTheDocument());
   return utils;
 };
@@ -142,12 +143,21 @@ test('音素材が無ければ案内を表示する', async () => {
   expect(screen.getByText(/まだ音素材がありません/)).toBeInTheDocument();
 });
 
-test('ドラッグでは音素材の ID だけを渡す', async () => {
+test('カードはドラッグさせず（別ページには置けないため）、音楽づくりページでの使い方を案内する', async () => {
+  await seed();
+  render(<MemoryRouter><SoundLibrary /></MemoryRouter>);
+  await waitFor(() => expect(cards()).toHaveLength(3));
+  const card = cardFor('たいこ');
+  expect(card).not.toHaveAttribute('draggable');
+  expect(within(card).queryByText(/ドラッグ&ドロップできます/)).not.toBeInTheDocument();
+  expect(within(card).getByRole('link', { name: '音楽づくり' })).toHaveAttribute('href', '/daw');
+});
+
+test('タグ編集・削除ボタンには音の名前付きの読み上げ用ラベルがある', async () => {
   await seed();
   await renderLibrary();
-  const setData = jest.fn();
-  fireEvent.dragStart(cardFor('たいこ'), { dataTransfer: { setData, effectAllowed: 'all' } });
-  expect(setData).toHaveBeenCalledWith('text/plain', 'sound-id:1');
+  expect(screen.getByRole('button', { name: 'たいこのタグを編集' })).toHaveAttribute('aria-expanded', 'false');
+  expect(screen.getByRole('button', { name: '雨の音を削除' })).toBeInTheDocument();
 });
 
 test('削除に失敗したら知らせて一覧は残す', async () => {

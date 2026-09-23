@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { Globe, LoaderCircle, Play, Square, X } from 'lucide-react';
 import './CloudPage.css';
+import Icon from '../components/Icon';
 import { addRecording, getAllRecordings, isQuotaExceededError } from '../utils/indexedDB';
 import {
   blobToAudioDataUrl,
@@ -367,7 +369,7 @@ const CloudPage = () => {
     return (
       <div className="cloud-page">
         <div className="room-join-container">
-          <h2>🌐 クラウド音声共有</h2>
+          <h2><Icon icon={Globe} /> クラウド音声共有</h2>
           <p>部屋番号を入力して音声を共有しましょう</p>
           
           <form onSubmit={(e) => { e.preventDefault(); joinRoom(roomNumber); }} 
@@ -403,10 +405,10 @@ const CloudPage = () => {
   return (
     <div className="cloud-page">
       <header className="cloud-header">
-        <h2>🌐 クラウド音声共有</h2>
+        <h2><Icon icon={Globe} /> クラウド音声共有</h2>
         <div className="room-info">
           <span>部屋: {currentRoom.room_number} - {currentRoom.room_name}</span>
-          <button onClick={leaveRoom} className="leave-button">退室</button>
+          <button type="button" onClick={leaveRoom} className="leave-button">退室</button>
         </div>
       </header>
 
@@ -542,7 +544,7 @@ const CloudPage = () => {
               {uploadData.tags.map(tag => (
                 <span key={tag} className="tag">
                   {tag}
-                  <button type="button" onClick={() => removeTag(tag)} className="tag-remove">×</button>
+                  <button type="button" onClick={() => removeTag(tag)} className="tag-remove touch-target-expand" aria-label={`タグ「${tag}」を削除`}><Icon icon={X} size={12} /></button>
                 </span>
               ))}
             </div>
@@ -564,7 +566,7 @@ const CloudPage = () => {
             placeholder="ファイル名で検索"
             className="search-input"
           />
-          <button onClick={handleSearch} className="search-button">検索</button>
+          <button type="button" onClick={handleSearch} className="search-button">検索</button>
         </div>
       </section>
 
@@ -598,18 +600,21 @@ const CloudPage = () => {
                 
                 <div className="audio-actions">
                   <button 
+                    type="button"
                     onClick={() => playAudioFile(audioFile)} 
                     className="play-button"
                     title={playingAudioId === audioFile.id ? '停止' : '再生'}
+                    aria-label={`${audioFile.file_name}を${playingAudioId === audioFile.id ? '停止' : '再生'}`}
                   >
-                    {playingAudioId === audioFile.id ? '⏹️' : '▶️'}
+                    <Icon icon={playingAudioId === audioFile.id ? Square : Play} fill="currentColor" />
                   </button>
                   <button 
+                    type="button"
                     onClick={() => handleDownload(audioFile)} 
                     className="download-button"
                     disabled={isLoading}
                   >
-                    {isLoading ? '追加中...' : '音ライブラリーに追加'}
+                    {isLoading ? <><Icon icon={LoaderCircle} className="icon-spin" /> 追加中...</> : '音ライブラリーに追加'}
                   </button>
                 </div>
               </div>

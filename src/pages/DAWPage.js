@@ -1,5 +1,33 @@
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
+import {
+  BookOpen,
+  CircleCheck,
+  CloudUpload,
+  FolderOpen,
+  GripVertical,
+  Headphones,
+  LoaderCircle,
+  Minus,
+  Monitor,
+  Music,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Pause,
+  Piano,
+  Play,
+  Plus,
+  RotateCcw,
+  Save,
+  Square,
+  TabletSmartphone,
+  Tags,
+  Trash2,
+  TriangleAlert,
+  X,
+  ZoomIn
+} from 'lucide-react';
 import './DAWPage.css';
+import Icon from '../components/Icon';
 import {
   addRecordings,
   deleteProjectAutoSave,
@@ -347,7 +375,7 @@ const DAWPage = () => {
         if (session !== playbackSessionRef.current || !isMountedRef.current) return;
 
         if (ctx.state && ctx.state !== 'running') {
-          setError('音を再生できませんでした。もう一度 ▶️ を押してください。');
+          setError('音を再生できませんでした。もう一度「再生」ボタンを押してください。');
           haltPlayback(false);
           return;
         }
@@ -1249,25 +1277,25 @@ const DAWPage = () => {
     trackIdCounterRef.current = 1;
     setError(null);
     setIsProjectLoaded(true);
-    alert('✅ プロジェクトをリセットしました');
+    alert('プロジェクトをリセットしました');
   };
 
-  const saveStatusLabel = {
-    pending: '💾 保存待ち...',
-    saving: '💾 保存中...',
-    saved: '✅ 自動保存しました',
-    error: '⚠️ 自動保存に失敗'
+  const saveStatusView = {
+    pending: { icon: Save, text: '保存待ち...' },
+    saving: { icon: LoaderCircle, text: '保存中...', className: 'icon-spin' },
+    saved: { icon: CircleCheck, text: '自動保存しました' },
+    error: { icon: TriangleAlert, text: '自動保存に失敗' }
   }[saveStatus];
 
   return (
     <div className="daw-page">
-      <h2>🎹 音楽づくりページ</h2>
+      <h2><Icon icon={Piano} /> 音楽づくりページ</h2>
       <p>音素材をドラッグ&ドロップして音楽を作りましょう！</p>
 
       {error && (
         <div className="error-message" role="alert">
-          <span>⚠️ {error}</span>
-          <button type="button" onClick={() => setError(null)} aria-label="メッセージを閉じる">×</button>
+          <span><Icon icon={TriangleAlert} /> {error}</span>
+          <button type="button" onClick={() => setError(null)} aria-label="メッセージを閉じる"><Icon icon={X} /></button>
         </div>
       )}
 
@@ -1284,11 +1312,11 @@ const DAWPage = () => {
               className="button-secondary"
               onClick={() => setShowSoundPanel(!showSoundPanel)}
             >
-              {showSoundPanel ? '🎵 音素材を隠す' : '🎵 音素材を表示'}
+              <Icon icon={showSoundPanel ? PanelLeftClose : PanelLeftOpen} /> {showSoundPanel ? '音素材を隠す' : '音素材を表示'}
             </button>
-            {saveStatusLabel && (
+            {saveStatusView && (
               <span className={`autosave-status autosave-status-${saveStatus}`} role="status">
-                {saveStatusLabel}
+                <Icon icon={saveStatusView.icon} className={saveStatusView.className} /> {saveStatusView.text}
               </span>
             )}
           </div>
@@ -1296,13 +1324,13 @@ const DAWPage = () => {
           <div className="right-controls">
             <div className="project-controls">
               <button type="button" className="button-secondary" onClick={saveProject}>
-                💾 プロジェクト保存
+                <Icon icon={Save} /> プロジェクト保存
               </button>
               <button type="button" className="button-secondary" onClick={openCloudSaveDialog}>
-                🌐 クラウド保存
+                <Icon icon={CloudUpload} /> クラウド保存
               </button>
               <label className="button-secondary file-input-label">
-                📁 プロジェクト読み込み
+                <Icon icon={FolderOpen} /> プロジェクト読み込み
                 <input
                   type="file"
                   accept=".json,application/json"
@@ -1314,13 +1342,13 @@ const DAWPage = () => {
                 type="button"
                 className="button-warning"
                 onClick={() => {
-                  if (window.confirm('🗑️ プロジェクトをリセットしますか？\n\n現在の作業内容がすべて削除されます。')) {
+                  if (window.confirm('プロジェクトをリセットしますか？\n\n現在の作業内容がすべて削除されます。')) {
                     resetProject();
                   }
                 }}
                 title="プロジェクトをリセット（自動保存データもクリア）"
               >
-                🗑️ リセット
+                <Icon icon={RotateCcw} /> リセット
               </button>
               <button
                 type="button"
@@ -1328,7 +1356,9 @@ const DAWPage = () => {
                 onClick={exportAudio}
                 disabled={isExporting}
               >
-                {isExporting ? '🔄 出力中...' : '🎧 音源出力'}
+                {isExporting
+                  ? <><Icon icon={LoaderCircle} className="icon-spin" /> 出力中...</>
+                  : <><Icon icon={Headphones} /> 音源出力</>}
               </button>
             </div>
           </div>
@@ -1343,16 +1373,16 @@ const DAWPage = () => {
               onClick={isPlaying ? pause : play}
               aria-label={isPlaying ? '一時停止' : '再生'}
             >
-              {isPlaying ? '⏸️' : '▶️'}
+              <Icon icon={isPlaying ? Pause : Play} fill="currentColor" />
             </button>
             <button type="button" className="transport-btn stop-btn" onClick={stop} aria-label="停止">
-              ⏹️
+              <Icon icon={Square} fill="currentColor" />
             </button>
           </div>
 
           <div className="timing-controls">
             <div className="zoom-control">
-              <span>🔍 タイムライン拡大/縮小:</span>
+              <span><Icon icon={ZoomIn} /> タイムライン拡大/縮小:</span>
               <button
                 type="button"
                 className="zoom-btn"
@@ -1360,7 +1390,7 @@ const DAWPage = () => {
                 title="ズームアウト（縮小）"
                 aria-label="ズームアウト（縮小）"
               >
-                －
+                <Icon icon={Minus} />
               </button>
               <span className="zoom-display">
                 {Math.round(pixelsPerSecond / DEFAULT_PIXELS_PER_SECOND * 100)}%
@@ -1372,7 +1402,7 @@ const DAWPage = () => {
                 title="ズームイン（拡大）"
                 aria-label="ズームイン（拡大）"
               >
-                ＋
+                <Icon icon={Plus} />
               </button>
             </div>
           </div>
@@ -1382,7 +1412,7 @@ const DAWPage = () => {
       <div className="daw-main-area">
         <div className={`sound-panel ${!showSoundPanel ? 'panel-hidden' : ''}`}>
           <div className="sound-panel-header">
-            <h3>🎵 音素材</h3>
+            <h3><Icon icon={Music} /> 音素材</h3>
             <button
               type="button"
               className="sound-panel-close"
@@ -1390,14 +1420,14 @@ const DAWPage = () => {
               title="音素材パネルを閉じる"
               aria-label="音素材パネルを閉じる"
             >
-              ✕
+              <Icon icon={X} />
             </button>
           </div>
 
           {/* タグフィルター */}
           {allTags.length > 0 && (
             <div className="sound-panel-filters">
-              <div className="tag-filter-label">🏷️ タグで絞り込み:</div>
+              <div className="tag-filter-label"><Icon icon={Tags} /> タグで絞り込み:</div>
               <div className="tag-filters-compact">
                 <button
                   type="button"
@@ -1475,7 +1505,7 @@ const DAWPage = () => {
             ))}
             <div className="track-add-button-container" style={{ height: trackHeight }}>
               <button type="button" className="button-primary track-add-btn" onClick={addTrack}>
-                ➕ トラック追加
+                <Icon icon={Plus} /> トラック追加
               </button>
             </div>
           </div>
@@ -1523,7 +1553,7 @@ const DAWPage = () => {
 
       <div className="instructions-collapsible">
         <div className="instructions-summary" role="button" tabIndex={0} onClick={() => setInstructionsExpanded((prev) => !prev)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setInstructionsExpanded((prev) => !prev); }}>
-          <span className="instructions-title">📖 使い方</span>
+          <span className="instructions-title"><Icon icon={BookOpen} /> 使い方</span>
           <button type="button" className="instructions-toggle" aria-expanded={instructionsExpanded} aria-controls="instructions-body">
             {instructionsExpanded ? '折りたたむ' : '表示'}
           </button>
@@ -1553,14 +1583,14 @@ const DAWPage = () => {
             style={{ position: 'fixed', zIndex: 1001 }}
           >
             <div className="modal-header">
-              <h3>🌐 楽曲をクラウドに保存</h3>
+              <h3><Icon icon={CloudUpload} /> 楽曲をクラウドに保存</h3>
               <button
                 type="button"
                 className="modal-close-btn"
                 onClick={() => setShowCloudSaveDialog(false)}
                 aria-label="ダイアログを閉じる"
               >
-                ×
+                <Icon icon={X} />
               </button>
             </div>
 
@@ -1739,7 +1769,7 @@ const SoundItem = ({ sound, onDragStart, onPreview, onStopPreview, onTouchDragOv
       onMouseEnter={handleMouseEnter}
     >
       <div className="sound-info">
-        <span className="sound-drag-handle" aria-hidden="true" title="ここを持ってドラッグ">⋮⋮</span>
+        <span className="sound-drag-handle" aria-hidden="true" title="ここを持ってドラッグ"><Icon icon={GripVertical} /></span>
         <h4>{sound.name}</h4>
         <div className="sound-tags">
           {(sound.tags || []).map((tag, index) => (
@@ -1753,7 +1783,7 @@ const SoundItem = ({ sound, onDragStart, onPreview, onStopPreview, onTouchDragOv
             onClick={isPlaying ? stopSound : playSound}
             aria-label={isPlaying ? `${sound.name}を停止` : `${sound.name}を試聴`}
           >
-            {isPlaying ? '⏹️' : '▶️'}
+            <Icon icon={isPlaying ? Square : Play} fill="currentColor" />
           </button>
         </div>
       </div>
@@ -1781,7 +1811,7 @@ const TrackHeader = ({ track, onRemove, canRemove, trackHeight, trackIndex }) =>
             title={canRemove ? `${displayName}を削除` : 'トラックは最低1つ必要です'}
             aria-label={`${displayName}を削除`}
           >
-            🗑️
+            <Icon icon={Trash2} />
           </button>
         </div>
       </div>
@@ -1957,12 +1987,12 @@ const AudioClip = ({ clip, trackId, onRemove, onDragStart, onDragEnd, onTouchDra
         <span className="clip-name">{clip.soundData.name || '不明な音素材'}</span>
         <button
           type="button"
-          className="remove-clip-btn"
+          className="remove-clip-btn touch-target-expand"
           onClick={onRemove}
           title="クリップを削除"
           aria-label={`${clip.soundData.name || 'クリップ'}を削除`}
         >
-          ×
+          <Icon icon={X} size={14} />
         </button>
       </div>
       <div className="clip-waveform">
@@ -1987,24 +2017,24 @@ const AudioClip = ({ clip, trackId, onRemove, onDragStart, onDragEnd, onTouchDra
 const InstructionsSection = React.memo(() => {
   return (
     <div className="instructions card">
-      <h3>📖 使い方</h3>
+      <h3><Icon icon={BookOpen} /> 使い方</h3>
       <ul>
-        <li><strong>🖥️ PC:</strong> 左側の音素材パネルから音素材をトラックにドラッグ&ドロップして配置</li>
-        <li><strong>📱 タブレット:</strong> 音素材の左にある「⋮⋮」を持って、トラックまで指を動かして配置（音素材を横にスライドしても配置できます）</li>
+        <li><strong><Icon icon={Monitor} /> PC:</strong> 左側の音素材パネルから音素材をトラックにドラッグ&ドロップして配置</li>
+        <li><strong><Icon icon={TabletSmartphone} /> タブレット:</strong> 音素材の左にある <Icon icon={GripVertical} label="つまみ" /> を持って、トラックまで指を動かして配置（音素材を横にスライドしても配置できます）</li>
         <li>配置済みの音素材もドラッグして別の場所・別のトラックに移動できます</li>
         <li>ドラッグ中は配置予定位置に青い影が表示されます</li>
-        <li><strong>🔍 ズーム機能:</strong> ＋／－ボタンでタイムラインの表示倍率を変更できます</li>
+        <li><strong><Icon icon={ZoomIn} /> ズーム機能:</strong> <Icon icon={Plus} label="拡大" />／<Icon icon={Minus} label="縮小" /> ボタンでタイムラインの表示倍率を変更できます</li>
         <li>タイムラインは秒数ベースで、0.1秒単位で音素材を配置できます</li>
-        <li>音素材パネルの▶️ボタンで個別に音を確認できます</li>
-        <li>▶️ボタンで再生、⏸️ボタンで一時停止、⏹️ボタンで停止（最後まで再生すると先頭に戻ります）</li>
+        <li>音素材パネルの <Icon icon={Play} label="再生" /> ボタンで個別に音を確認できます</li>
+        <li><Icon icon={Play} label="再生" /> ボタンで再生、<Icon icon={Pause} label="一時停止" /> ボタンで一時停止、<Icon icon={Square} label="停止" /> ボタンで停止（最後まで再生すると先頭に戻ります）</li>
         <li>トラックを追加して複数の音を重ねることができます</li>
-        <li><strong>💾 プロジェクト保存:</strong> 編集中のデータと音素材をJSONファイルとして保存</li>
-        <li><strong>📁 プロジェクト読み込み:</strong> 保存したプロジェクトファイルを読み込んで編集を再開</li>
-        <li><strong>🎧 音源出力:</strong> 完成した楽曲をWAVファイルとして出力</li>
-        <li><strong>🗑️ リセット:</strong> 現在のプロジェクトをリセットして新しく始める</li>
+        <li><strong><Icon icon={Save} /> プロジェクト保存:</strong> 編集中のデータと音素材をJSONファイルとして保存</li>
+        <li><strong><Icon icon={FolderOpen} /> プロジェクト読み込み:</strong> 保存したプロジェクトファイルを読み込んで編集を再開</li>
+        <li><strong><Icon icon={Headphones} /> 音源出力:</strong> 完成した楽曲をWAVファイルとして出力</li>
+        <li><strong><Icon icon={RotateCcw} /> リセット:</strong> 現在のプロジェクトをリセットして新しく始める</li>
       </ul>
       <div className="auto-save-info">
-        <h4>💾 自動保存機能</h4>
+        <h4><Icon icon={Save} /> 自動保存機能</h4>
         <ul>
           <li><strong>自動保存:</strong> トラックとズーム倍率の変更は自動的に保存されます（左上に保存状況が表示されます）</li>
           <li><strong>他ページとの連携:</strong> 「音あつめ」ページで録音した音は自動的に反映されます</li>
@@ -2013,7 +2043,7 @@ const InstructionsSection = React.memo(() => {
         </ul>
       </div>
       <div className="mobile-tips">
-        <h4>📱 タブレット利用のコツ</h4>
+        <h4><Icon icon={TabletSmartphone} /> タブレット利用のコツ</h4>
         <ul>
           <li>音素材リストを上下に動かすとスクロール、横に動かすとドラッグになります</li>
           <li>ドラッグ中は画面がスクロールしないよう制御されます</li>

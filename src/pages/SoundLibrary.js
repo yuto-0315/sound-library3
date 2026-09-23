@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { Link } from 'react-router-dom';
+import { Calendar, Inbox, Library, Piano, Plus, RefreshCw, RotateCcw, Search, Tag, Tags, Trash2, TriangleAlert, X } from 'lucide-react';
 import './SoundLibrary.css';
+import Icon from '../components/Icon';
 import { getAllRecordings, deleteRecording, addTagToRecording, removeTagFromRecording } from '../utils/indexedDB';
 import { isEnterKey } from '../utils/keyboard';
 
@@ -103,7 +106,7 @@ const SoundLibrary = () => {
   if (isLoading) {
     return (
       <div className="sound-library">
-        <h2>📚 音ライブラリ</h2>
+        <h2><Icon icon={Library} /> 音ライブラリ</h2>
         <div className="loading">読み込み中...</div>
       </div>
     );
@@ -112,10 +115,10 @@ const SoundLibrary = () => {
   if (loadError) {
     return (
       <div className="sound-library">
-        <h2>📚 音ライブラリ</h2>
+        <h2><Icon icon={Library} /> 音ライブラリ</h2>
         <div className="error-message" role="alert">{loadError}</div>
         <button type="button" className="clear-filters-btn" onClick={loadSounds}>
-          🔄 もう一度読み込む
+          <Icon icon={RefreshCw} /> もう一度読み込む
         </button>
       </div>
     );
@@ -123,12 +126,12 @@ const SoundLibrary = () => {
 
   return (
     <div className="sound-library">
-      <h2>📚 音ライブラリ</h2>
+      <h2><Icon icon={Library} /> 音ライブラリ</h2>
       <p>集めた音素材を見たり、整理したりできます</p>
 
       <div className="library-controls card">
         <div className="search-section">
-          <h3>🔍 音を探す</h3>
+          <h3><Icon icon={Search} /> 音を探す</h3>
           <div className="search-controls">
             <input
               type="text"
@@ -141,7 +144,7 @@ const SoundLibrary = () => {
         </div>
 
         <div className="filter-section">
-          <h3>🏷️ タグで絞り込み</h3>
+          <h3><Icon icon={Tags} /> タグで絞り込み</h3>
           <div className="tag-filters">
             <button
               className={`tag-filter-btn ${selectedTag === '' ? 'active' : ''}`}
@@ -162,7 +165,7 @@ const SoundLibrary = () => {
           
           {(selectedTag || searchQuery) && (
             <button onClick={clearFilters} className="clear-filters-btn">
-              🗑️ フィルターをクリア
+              <Icon icon={RotateCcw} /> フィルターをクリア
             </button>
           )}
         </div>
@@ -188,12 +191,12 @@ const SoundLibrary = () => {
           <div className="no-sounds">
             {sounds.length === 0 ? (
               <div>
-                <p>📭 まだ音素材がありません</p>
+                <p><Icon icon={Inbox} /> まだ音素材がありません</p>
                 <p>音あつめページから音を録音してみましょう！</p>
               </div>
             ) : (
               <div>
-                <p>🔍 検索条件に合う音が見つかりませんでした</p>
+                <p><Icon icon={Search} /> 検索条件に合う音が見つかりませんでした</p>
                 <p>別のキーワードやタグで試してみてください</p>
               </div>
             )}
@@ -242,49 +245,36 @@ const LibrarySoundCard = ({ sound, onDelete, onAddTag, onRemoveTag }) => {
     }
   };
 
-  const dragStart = (e) => {
-    // ID方式: 音素材のIDのみを送信
-    e.dataTransfer.setData('text/plain', `sound-id:${sound.id}`);
-    e.dataTransfer.effectAllowed = 'copy';
-  };
-
-  const dragEnd = (e) => {
-    // DAWPageのクリーンアップ関数を呼び出す
-    if (window.cleanupDragStateCallback) {
-      window.cleanupDragStateCallback();
-    }
-  };
-
   return (
-    <div 
-      className="library-sound-card"
-      draggable
-      onDragStart={dragStart}
-      onDragEnd={dragEnd}
-    >
+    <div className="library-sound-card">
       <div className="sound-header">
         <h4>{sound.name}</h4>
         <div className="sound-actions">
           <button 
+            type="button"
             className="tag-edit-btn"
             onClick={() => setShowTagEditor(!showTagEditor)}
             title="タグを編集"
+            aria-label={`${sound.name}のタグを編集`}
+            aria-expanded={showTagEditor}
           >
-            🏷️
+            <Icon icon={Tag} />
           </button>
           <button 
+            type="button"
             className="delete-btn"
             onClick={() => setShowDeleteConfirm(true)}
             title="削除"
+            aria-label={`${sound.name}を削除`}
           >
-            🗑️
+            <Icon icon={Trash2} />
           </button>
         </div>
       </div>
       
       <div className="sound-meta">
         <p className="sound-date">
-          📅 {new Date(sound.createdAt).toLocaleDateString('ja-JP')}
+          <Icon icon={Calendar} /> {new Date(sound.createdAt).toLocaleDateString('ja-JP')}
         </p>
         {(sound.tags || []).length > 0 && (
           <div className="sound-tags">
@@ -293,11 +283,13 @@ const LibrarySoundCard = ({ sound, onDelete, onAddTag, onRemoveTag }) => {
                 {tag}
                 {showTagEditor && (
                   <button 
-                    className="tag-remove-btn"
+                    type="button"
+                    className="tag-remove-btn touch-target-expand"
                     onClick={() => handleRemoveTag(tag)}
                     title="タグを削除"
+                    aria-label={`タグ「${tag}」を削除`}
                   >
-                    ×
+                    <Icon icon={X} size={12} />
                   </button>
                 )}
               </span>
@@ -316,8 +308,8 @@ const LibrarySoundCard = ({ sound, onDelete, onAddTag, onRemoveTag }) => {
             placeholder="新しいタグを入力..."
             className="tag-input"
           />
-          <button onClick={handleAddTag} className="add-tag-btn">
-            ➕ 追加
+          <button type="button" onClick={handleAddTag} className="add-tag-btn">
+            <Icon icon={Plus} /> 追加
           </button>
         </div>
       )}
@@ -336,20 +328,22 @@ const LibrarySoundCard = ({ sound, onDelete, onAddTag, onRemoveTag }) => {
         お使いのブラウザは音声再生に対応していません。
       </audio>
       
-      <div className="drag-hint">
-        🎵 DAWページにドラッグ&ドロップできます
-      </div>
+      {/* 以前は「DAWページにドラッグ&ドロップできます」と表示していたが、別のページなのでできなかった */}
+      <p className="drag-hint">
+        <Icon icon={Piano} /> <Link to="/daw">音楽づくり</Link>ページの「音素材」から使えます
+      </p>
 
       {showDeleteConfirm && (
         <div className="delete-confirm-overlay">
           <div className="delete-confirm-dialog">
-            <h4>⚠️ 削除の確認</h4>
+            <h4><Icon icon={TriangleAlert} /> 削除の確認</h4>
             <p>「{sound.name}」を削除しますか？</p>
             <div className="delete-confirm-actions">
-              <button onClick={handleDelete} className="confirm-delete-btn">
+              <button type="button" onClick={handleDelete} className="confirm-delete-btn">
                 削除する
               </button>
               <button 
+                type="button"
                 onClick={() => setShowDeleteConfirm(false)}
                 className="cancel-delete-btn"
               >

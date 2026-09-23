@@ -3,6 +3,8 @@
 
 .App {
   height: 100vh;
+  /* iPad Safari の 100vh はツールバーの分だけ画面より高く、下端が見切れる */
+  height: 100dvh;
   display: flex;
   flex-direction: column;
   background-color: #f5f7fa;
@@ -15,6 +17,7 @@
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
+  -webkit-overflow-scrolling: touch; /* 古い iPad で慣性スクロールさせる */
   padding: 20px;
   min-height: 0;
 }
@@ -221,4 +224,63 @@
   min-height: 44px;
   padding: 10px 20px;
   font-size: 16px;
+}
+
+/* lucide-react のアイコン（components/Icon.js） */
+.app-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+  vertical-align: -0.18em;
+  flex-shrink: 0;
+}
+
+.app-icon-svg {
+  display: block;
+}
+
+button .app-icon + *,
+button .app-icon {
+  pointer-events: none;
+}
+
+.icon-spin .app-icon-svg {
+  animation: app-icon-spin 1s linear infinite;
+}
+
+@keyframes app-icon-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .icon-spin .app-icon-svg {
+    animation: none;
+  }
+}
+
+/* 小さく見えるボタンでも、指で押せる範囲は 44px 以上にする */
+.touch-target-expand {
+  position: relative;
+}
+
+.touch-target-expand::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 44px;
+  height: 44px;
+  transform: translate(-50%, -50%);
+}
+
+@media (hover: none) and (pointer: coarse) {
+  /* 16px 未満の入力欄は iPhone/iPad でフォーカス時に画面が拡大されてしまう */
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
 }

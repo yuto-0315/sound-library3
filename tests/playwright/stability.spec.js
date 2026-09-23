@@ -88,7 +88,7 @@ test.describe('データが消えない', () => {
     await page.getByRole('button', { name: /トラック追加/ }).click();
     await dropSoundOnTrack(page, 'テストの音', 1, 400);
     await expect(page.locator('.audio-clip')).toHaveCount(2);
-    await expect(page.getByText('✅ 自動保存しました')).toBeVisible();
+    await expect(page.getByText('自動保存しました')).toBeVisible();
 
     // ナビゲーションで別のページへ行って戻る（以前はここでタイムラインが空になっていた）
     await page.getByRole('menuitem', { name: /音あつめ/ }).click();
@@ -228,11 +228,16 @@ test.describe('タブレット（タッチ操作）', () => {
     await waitForDawLoaded(page);
     const item = await page.locator('.sound-item', { hasText: 'タッチの音' }).boundingBox();
     const track = await page.locator('.track').first().boundingBox();
-    const scrollBefore = await page.evaluate(() => window.scrollY);
+    // このアプリは .main-content の中でスクロールする
+    const scrollPosition = () => page.evaluate(() => ({
+      window: window.scrollY,
+      main: document.querySelector('.main-content').scrollTop
+    }));
+    const scrollBefore = await scrollPosition();
     await touchDrag(page, { x: item.x + 60, y: item.y + item.height / 2 }, { x: track.x + 200, y: track.y + 40 });
     await expect(page.locator('.audio-clip')).toHaveCount(1);
     // ドラッグ中にページが先頭に飛んだり、スクロールできない状態のまま残ったりしない
-    expect(await page.evaluate(() => window.scrollY)).toBe(scrollBefore);
+    expect(await scrollPosition()).toEqual(scrollBefore);
     expect(await page.evaluate(() => document.body.classList.contains('dragging'))).toBe(false);
     expect(await page.evaluate(() => getComputedStyle(document.body).position)).toBe('static');
     await expect(page.locator('.mobile-drag-preview')).toHaveCount(0);

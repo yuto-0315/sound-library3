@@ -208,8 +208,8 @@
   align-items: center;
   gap: 8px;
   min-height: 0;
-  max-height: 60px;
-  overflow: hidden;
+  /* 以前は max-height: 60px で長いメッセージが途中で切れていた */
+  overflow-wrap: anywhere;
 }
 
 .error-message:empty {
@@ -221,9 +221,12 @@
 }
 
 .error-message::before {
-  content: "⚠️";
-  font-size: 16px;
+  /* lucide の triangle-alert アイコン */
+  content: "";
+  width: 18px;
+  height: 18px;
   flex-shrink: 0;
+  background: url('data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="%23D32F2F" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"%3E%3Cpath d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/%3E%3Cpath d="M12 9v4"/%3E%3Cpath d="M12 17h.01"/%3E%3C/svg%3E') no-repeat center / contain;
 }
 
 /* 成功メッセージ */

@@ -79,7 +79,7 @@ const projectWithClips = () => serializeProject({
 });
 
 const waitForAutoSaveCompleted = async () => {
-  expect(await screen.findByText('✅ 自動保存しました', {}, { timeout: 3000 })).toBeInTheDocument();
+  expect(await screen.findByText('自動保存しました', {}, { timeout: 3000 })).toBeInTheDocument();
 };
 
 describe('自動保存と復元（ページ移動でタイムラインが消える不具合の回帰テスト）', () => {
@@ -186,7 +186,7 @@ describe('自動保存と復元（ページ移動でタイムラインが消え�
     await renderDAW();
     idb.failNextCommit(Object.assign(new Error('quota'), { name: 'QuotaExceededError' }), (tx) => tx.mode === 'readwrite');
     fireEvent.click(screen.getByRole('button', { name: /トラック追加/ }));
-    expect(await screen.findByText('⚠️ 自動保存に失敗', {}, { timeout: 3000 })).toBeInTheDocument();
+    expect(await screen.findByText('自動保存に失敗', {}, { timeout: 3000 })).toBeInTheDocument();
     expect(screen.getAllByText(/保存できる容量が足りない/).length).toBeGreaterThan(0);
   });
 

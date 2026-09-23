@@ -1,5 +1,7 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import { Globe, Library, Mic, Music, Piano } from 'lucide-react';
+import Icon from './Icon';
 import './Navigation.css';
 
 const Navigation = () => {
@@ -32,7 +34,7 @@ const Navigation = () => {
     <nav className="navigation" role="navigation" aria-label="メインナビゲーション">
       <div className="nav-container">
         <h1 className="nav-title" id="app-title">
-          <span role="img" aria-label="音符">🎵</span> 音楽づくりアプリ
+          <Icon icon={Music} label="音符" /> 音楽づくりアプリ
         </h1>
         
         {/* 現在のページを視覚的に分からない場合のためのスクリーンリーダー用情報 */}
@@ -49,7 +51,7 @@ const Navigation = () => {
               aria-current={isActive('/collection') || isActive('/') ? 'page' : undefined}
               aria-describedby="collection-desc"
             >
-              <span role="img" aria-label="マイク">🎤</span> 音あつめ
+              <Icon icon={Mic} label="マイク" /> 音あつめ
               <span id="collection-desc" className="sr-only">
                 音を録音したりファイルをアップロードするページ
               </span>
@@ -64,7 +66,7 @@ const Navigation = () => {
               aria-current={isActive('/library') ? 'page' : undefined}
               aria-describedby="library-desc"
             >
-              <span role="img" aria-label="本">📚</span> 音ライブラリ
+              <Icon icon={Library} label="本" /> 音ライブラリ
               <span id="library-desc" className="sr-only">
                 収集した音素材を管理・検索するページ
               </span>
@@ -79,7 +81,7 @@ const Navigation = () => {
               aria-current={isActive('/daw') ? 'page' : undefined}
               aria-describedby="daw-desc"
             >
-              <span role="img" aria-label="ピアノ">🎹</span> 音楽づくり
+              <Icon icon={Piano} label="ピアノ" /> 音楽づくり
               <span id="daw-desc" className="sr-only">
                 音素材を組み合わせて音楽を作成するページ
               </span>
@@ -94,7 +96,7 @@ const Navigation = () => {
               aria-current={isActive('/cloud') ? 'page' : undefined}
               aria-describedby="cloud-desc"
             >
-              <span role="img" aria-label="クラウド">🌐</span> みんなで共有
+              <Icon icon={Globe} label="クラウド" /> みんなで共有
               <span id="cloud-desc" className="sr-only">
                 音声をアップロードしてクラスのみんなと共有するページ
               </span>

@@ -213,7 +213,7 @@ describe('再生（Web Audio）', () => {
     await seedProject([drumClip(1, 0)]);
     await renderDAW();
     fireEvent.click(screen.getByRole('button', { name: '再生' }));
-    expect(await screen.findByText(/もう一度 ▶️ を押してください/)).toBeInTheDocument();
+    expect(await screen.findByText(/もう一度「再生」ボタンを押してください/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '再生' })).toBeInTheDocument();
   });
 
@@ -626,7 +626,7 @@ describe('自動保存の表示', () => {
     await renderDAW();
     fireEvent.click(screen.getByRole('button', { name: /トラック追加/ }));
     expect(screen.getByText(/保存待ち|保存中/)).toBeInTheDocument();
-    expect(await screen.findByText('✅ 自動保存しました', {}, { timeout: 3000 })).toBeInTheDocument();
+    expect(await screen.findByText('自動保存しました', {}, { timeout: 3000 })).toBeInTheDocument();
     const saved = await getProjectAutoSave();
     expect(saved.tracks).toHaveLength(2);
   });

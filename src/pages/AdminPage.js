@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
+import { School } from 'lucide-react';
 import './AdminPage.css';
+import Icon from '../components/Icon';
 import { saveSongData } from '../utils/indexedDB';
 
 const AdminPage = () => {
@@ -291,7 +293,7 @@ const AdminPage = () => {
   return (
     <div className="admin-page">
       <header className="admin-header">
-        <h1>🏫 先生用管理ページ</h1>
+        <h1><Icon icon={School} /> 先生用管理ページ</h1>
       </header>
 
       <nav className="admin-nav">

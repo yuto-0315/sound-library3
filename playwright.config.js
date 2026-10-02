@@ -13,6 +13,9 @@ module.exports = {
     ignoreHTTPSErrors: true,
     actionTimeout: 10000,
     video: 'retain-on-failure',
-    screenshot: 'only-on-failure'
+    screenshot: 'only-on-failure',
+    // インストール済みのブラウザの版が @playwright/test と違う場合は E2E_CHROMIUM_PATH で指定する
+    // （ファイルごとに launchOptions を指定しているテストは、そちらが優先される）
+    launchOptions: process.env.E2E_CHROMIUM_PATH ? { executablePath: process.env.E2E_CHROMIUM_PATH } : {}
   },
 };

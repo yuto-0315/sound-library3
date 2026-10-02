@@ -19,3 +19,19 @@ export const toTagList = (value) => {
   });
   return tags;
 };
+
+// 検索用にそろえる: 全角・半角（ＡＢＣ→abc、ｶﾀｶﾅ→カタカナ）、大文字・小文字、カタカナ・ひらがなを区別しない。
+// （「アメ」で「あめの音」が、「ﾄﾞｱ」で「ドアの音」が見つかるように）
+export const normalizeForSearch = (value) => {
+  let text = toText(value);
+  if (typeof text.normalize === 'function') text = text.normalize('NFKC');
+  return text
+    .toLowerCase()
+    .replace(/[ァ-ヶ]/g, (char) => String.fromCharCode(char.charCodeAt(0) - 0x60));
+};
+
+export const matchesSearch = (query, ...fields) => {
+  const needle = normalizeForSearch(query).trim();
+  if (!needle) return true;
+  return fields.flat().some((field) => normalizeForSearch(field).includes(needle));
+};

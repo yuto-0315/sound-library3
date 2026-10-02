@@ -1,0 +1,32 @@
+import { matchesSearch, normalizeForSearch, toTagList, toText } from '../../utils/text';
+
+describe('toText / toTagList', () => {
+  test('文字列と数字だけを文字にする', () => {
+    expect(toText('あめ')).toBe('あめ');
+    expect(toText(12)).toBe('12');
+    expect(toText({ a: 1 }, 'なし')).toBe('なし');
+    expect(toText(null)).toBe('');
+    expect(toText(NaN, 'x')).toBe('x');
+  });
+
+  test('タグは文字列だけを、前後の空白を除いて重複なしで返す', () => {
+    expect(toTagList([' 楽器 ', '楽器', 3, {}, null, ''])).toEqual(['楽器', '3']);
+    expect(toTagList('楽器')).toEqual([]);
+  });
+});
+
+describe('検索', () => {
+  test('カタカナ・ひらがな、全角・半角、大文字・小文字を区別しない', () => {
+    expect(normalizeForSearch('アメノオト')).toBe('あめのおと');
+    expect(normalizeForSearch('ﾄﾞｱ')).toBe('どあ');
+    expect(normalizeForSearch('ＡＢＣ')).toBe('abc');
+    expect(matchesSearch('アメ', 'あめの音')).toBe(true);
+    expect(matchesSearch('ﾄﾞｱ', 'ドアのしまる音')).toBe(true);
+    expect(matchesSearch('しぜん', 'みずの音', ['シゼン'])).toBe(true);
+  });
+
+  test('何も入れていなければすべて当てはまる。当てはまらなければ false', () => {
+    expect(matchesSearch('  ', 'たいこ')).toBe(true);
+    expect(matchesSearch('すず', 'たいこ', ['楽器'])).toBe(false);
+  });
+});

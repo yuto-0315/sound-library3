@@ -1,7 +1,5 @@
 // 音ライブラリページの基本動作。
-// （以前のこのファイルは localStorage からの読み込みや、インストールされていない
-//   user-event v14 の API を前提にしており、一度も通っていなかったため書き直した。
-//   データ保存まわりの詳しい回帰テストは SoundLibrary.data.test.js にある）
+// データ保存まわりの詳しい回帰テストは SoundLibrary.data.test.js にある
 import React from 'react';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
@@ -23,6 +21,8 @@ const seedSounds = async () => {
   await addRecording({ name: 'テスト音2', tags: ['music', 'melody'], audioData: makeDataUrl('mp4', 'audio/mp4'), createdAt: '2026-03-02T00:00:00Z' });
 };
 
+const tagFilters = () => document.querySelector('.tag-filters');
+
 describe('SoundLibrary Component', () => {
   beforeEach(() => {
     installFakeIndexedDB();
@@ -38,7 +38,8 @@ describe('SoundLibrary Component', () => {
   test('renders sound library interface', async () => {
     await renderLibrary();
     expect(screen.getByRole('heading', { level: 2, name: /音ライブラリ/ })).toBeInTheDocument();
-    expect(screen.getByRole('textbox')).toHaveAttribute('placeholder', '音の名前やタグで検索...');
+    expect(screen.getByRole('searchbox', { name: /音を探す/ })).toHaveAttribute('placeholder', '音の名前やタグで検索...');
+    expect(screen.getByRole('combobox', { name: 'ならべかた' })).toHaveValue('newest');
   });
 
   test('読み込み中の表示を出してから一覧を表示する', async () => {
@@ -48,16 +49,19 @@ describe('SoundLibrary Component', () => {
   });
 
   test('has proper accessibility structure', async () => {
+    await seedSounds();
     await renderLibrary();
-    expect(screen.getByRole('heading', { name: /音を探す/ })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: /タグで絞り込み/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'すべて' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: /タグで絞り込み/ })).toBeInTheDocument();
+    // 選ばれているタグは aria-pressed で伝える（色だけに頼らない）
+    expect(screen.getByRole('button', { name: 'すべて' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(tagFilters()).getByRole('button', { name: 'music' })).toHaveAttribute('aria-pressed', 'false');
   });
 
   test('displays empty state when no sounds', async () => {
     await renderLibrary();
     expect(screen.getByText(/まだ音素材がありません/)).toBeInTheDocument();
     expect(screen.getByText(/音あつめページから音を録音してみましょう/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '音あつめへ' })).toHaveAttribute('href', '/collection');
   });
 
   test('loads sounds from IndexedDB', async () => {
@@ -66,43 +70,70 @@ describe('SoundLibrary Component', () => {
     expect(screen.getByText('テスト音1')).toBeInTheDocument();
     expect(screen.getByText('テスト音2')).toBeInTheDocument();
     expect(screen.getAllByText('test').length).toBeGreaterThan(0);
+    expect(screen.getByText('全部で 2 こ')).toBeInTheDocument();
   });
 
   test('handles search functionality', async () => {
     await seedSounds();
     await renderLibrary();
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'テスト音1' } });
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'テスト音1' } });
     expect(screen.getByText('テスト音1')).toBeInTheDocument();
     expect(screen.queryByText('テスト音2')).not.toBeInTheDocument();
+    expect(screen.getByText('1 こ見つかりました（全部で 2 こ）')).toBeInTheDocument();
+  });
+
+  test('ひらがな・カタカナ、全角・半角を区別せずに探せる', async () => {
+    await addRecording({ name: 'あめの音', tags: [], audioData: makeDataUrl('wav', 'audio/wav') });
+    await addRecording({ name: 'ドアのしまる音', tags: ['ガッコウ'], audioData: makeDataUrl('wav', 'audio/wav') });
+    await renderLibrary();
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'アメ' } });
+    expect(screen.getByText('あめの音')).toBeInTheDocument();
+    expect(screen.queryByText('ドアのしまる音')).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'ﾄﾞｱ' } });
+    expect(screen.getByText('ドアのしまる音')).toBeInTheDocument();
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'がっこう' } });
+    expect(screen.getByText('ドアのしまる音')).toBeInTheDocument();
   });
 
   test('handles tag filtering', async () => {
     await seedSounds();
     await renderLibrary();
-    fireEvent.click(within(document.querySelector('.tag-filters')).getByRole('button', { name: 'melody' }));
+    fireEvent.click(within(tagFilters()).getByRole('button', { name: 'melody' }));
     expect(screen.queryByText('テスト音1')).not.toBeInTheDocument();
     expect(screen.getByText('テスト音2')).toBeInTheDocument();
+    // もう一度押すと絞り込みをやめる
+    fireEvent.click(within(tagFilters()).getByRole('button', { name: /melody/ }));
+    expect(screen.getByText('テスト音1')).toBeInTheDocument();
+    fireEvent.click(within(tagFilters()).getByRole('button', { name: 'melody' }));
     fireEvent.click(screen.getByRole('button', { name: 'すべて' }));
     expect(screen.getByText('テスト音1')).toBeInTheDocument();
   });
 
-  test('音声プレーヤーで再生できる（Data URL を渡す）', async () => {
+  test('大きな ▶ ボタンで、保存されている Data URL を 1 つの <audio> で再生する', async () => {
+    const audio = { play: jest.fn(() => Promise.resolve()), pause: jest.fn(), src: '' };
+    global.Audio = jest.fn(() => audio);
     await seedSounds();
     await renderLibrary();
-    const players = document.querySelectorAll('audio.sound-player');
-    expect(players).toHaveLength(2);
-    players.forEach((player) => {
-      expect(player).toHaveAttribute('controls');
-      expect(player.getAttribute('src')).toMatch(/^data:audio\/(wav|mp4);base64,/);
-    });
+    // 一覧に <audio controls> を並べない（小さくて押しにくく、たくさんあると重い）
+    expect(document.querySelectorAll('audio')).toHaveLength(0);
+    fireEvent.click(screen.getByRole('button', { name: 'テスト音2をきく' }));
+    expect(audio.src).toMatch(/^data:audio\/mp4;base64,/);
+    expect(screen.getByRole('button', { name: 'テスト音2を止める' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'テスト音1をきく' }));
+    expect(audio.src).toMatch(/^data:audio\/wav;base64,/);
+    expect(screen.getByRole('button', { name: 'テスト音2をきく' })).toBeInTheDocument();
+    expect(global.Audio).toHaveBeenCalledTimes(1);
   });
 
   test('handles sound deletion', async () => {
     await seedSounds();
     await renderLibrary();
     fireEvent.click(screen.getByRole('button', { name: 'テスト音1を削除' }));
-    expect(screen.getByText('「テスト音1」を削除しますか？')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '削除する' }));
+    const dialog = screen.getByRole('dialog', { name: '削除の確認' });
+    expect(within(dialog).getByText('「テスト音1」を削除しますか？')).toBeInTheDocument();
+    // うっかり消さないよう、最初にフォーカスが当たるのは「キャンセル」
+    expect(within(dialog).getByRole('button', { name: 'キャンセル' })).toHaveFocus();
+    fireEvent.click(within(dialog).getByRole('button', { name: /削除する/ }));
     await waitFor(() => expect(screen.queryByText('テスト音1')).not.toBeInTheDocument());
     expect(screen.getByText('テスト音2')).toBeInTheDocument();
   });
@@ -130,8 +161,8 @@ describe('SoundLibrary Component', () => {
     await seedSounds();
     await addRecording({ name: '別の音', tags: ['music'], audioData: makeDataUrl('wav', 'audio/wav') });
     await renderLibrary();
-    fireEvent.click(within(document.querySelector('.tag-filters')).getByRole('button', { name: 'music' }));
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'テスト' } });
+    fireEvent.click(within(tagFilters()).getByRole('button', { name: 'music' }));
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'テスト' } });
     expect(screen.getByText('テスト音2')).toBeInTheDocument();
     expect(screen.queryByText('別の音')).not.toBeInTheDocument();
     expect(screen.queryByText('テスト音1')).not.toBeInTheDocument();

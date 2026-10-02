@@ -605,33 +605,6 @@
   }
 }
 
-/* ダークモード対応 */
-@media (prefers-color-scheme: dark) {
-  .sound-card {
-    background: #2d2d2d;
-    border-color: #444;
-    color: #fff;
-  }
-  
-  .ios-notice {
-    background: #1e3a8a;
-    border-color: #3b82f6;
-    color: #fff;
-  }
-  
-  .no-recordings {
-    background: #333;
-    border-color: #555;
-    color: #ccc;
-  }
-  
-  .validation-message {
-    background: #1e3a8a;
-    border-color: #3b82f6;
-    color: #fff;
-  }
-}
-
 /* 動きを抑制する設定 */
 @media (prefers-reduced-motion: reduce) {
   .pulse-dot {

@@ -1,15 +1,89 @@
 /* アクセシビリティユーティリティのインポート */
 @import './utils/accessibility.css';
 
+/* ===== デザインの基本（色・角の丸み・影） =====
+   白い文字を載せる色は、白とのコントラスト比 4.5:1 以上（WCAG AA）にしている。
+   入力欄などの枠線は背景と 3:1 以上。
+
+   ダークモードには対応しない（明るい表示に固定する）。
+   以前は一部の色だけダークモードで暗くなり、白い背景に白い文字が出て読めない箇所があった。 */
+:root {
+  color-scheme: light;
+
+  --color-bg: #f3f5fa;
+  --color-surface: #ffffff;
+  --color-surface-muted: #f7f9fc;
+  --color-border: #d7deea;
+  --color-border-strong: #7d8aa1;
+  --color-text: #1b2333;
+  --color-text-muted: #4a5568;
+
+  --color-primary: #1d4ed8;
+  --color-primary-hover: #1e40af;
+  --color-primary-soft: #e6edff;
+  --color-primary-soft-text: #1e3a8a;
+
+  --color-record: #d61f1f;
+  --color-record-hover: #b91c1c;
+  --color-danger: #b42318;
+  --color-danger-soft: #fdecea;
+  --color-success: #067647;
+  --color-success-soft: #e7f6ee;
+  --color-warning: #8a5300;
+  --color-warning-soft: #fff4e0;
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --radius-pill: 999px;
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.08);
+  --shadow-md: 0 4px 14px rgba(16, 24, 40, 0.1);
+  --shadow-lg: 0 12px 32px rgba(16, 24, 40, 0.18);
+
+  /* 指で押しやすい大きさ */
+  --tap-min: 48px;
+
+  --font-ui: -apple-system, BlinkMacSystemFont, 'Hiragino Sans', 'Hiragino Kaku Gothic ProN',
+    'Noto Sans JP', 'Yu Gothic UI', 'Segoe UI', Meiryo, sans-serif;
+
+  /* 以前からの名前（ほかの CSS が使っている） */
+  --primary-color: var(--color-primary);
+  --primary-hover: var(--color-primary-hover);
+  --secondary-color: #c2410c;
+  --secondary-hover: #9a3412;
+  --accent-color: #6d28d9;
+  --accent-hover: #5b21b6;
+  --success-color: var(--color-success);
+  --warning-color: var(--color-danger);
+  --warning-hover: #8f1d13;
+  --error-color: var(--color-danger);
+  --background-color: var(--color-bg);
+  --card-color: var(--color-surface);
+  --text-color: var(--color-text);
+  --text-secondary: var(--color-text-muted);
+  --border-color: var(--color-border);
+  --focus-color: var(--color-primary);
+  --safe-blue: #1d4ed8;
+  --safe-orange: #c2410c;
+  --safe-purple: #6d28d9;
+  --safe-cyan: #0e7490;
+  --safe-pink: #be185d;
+  --safe-yellow: #facc15;
+}
+
+body {
+  background-color: var(--color-bg);
+}
+
 .App {
   height: 100vh;
   /* iPad Safari の 100vh はツールバーの分だけ画面より高く、下端が見切れる */
   height: 100dvh;
   display: flex;
   flex-direction: column;
-  background-color: #f5f7fa;
-  color: #333;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-ui);
   line-height: 1.6;
 }
 
@@ -17,188 +91,366 @@
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 20px;
+  padding: 24px;
   min-height: 0;
+  -webkit-overflow-scrolling: touch;
 }
 
-/* iPad向けのレスポンシブデザイン */
+/* 音楽づくりページ: 画面いっぱいを使い、ページ全体はスクロールしない */
+.main-content--fill {
+  overflow: hidden;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+}
+
+.main-content:focus {
+  outline: none;
+}
+
 @media (max-width: 1024px) {
   .main-content {
-    padding: 15px;
+    padding: 18px;
+  }
+
+  .main-content--fill {
+    padding: 8px;
   }
 }
 
-@media (max-width: 768px) {
+@media (max-width: 600px) {
   .main-content {
-    padding: 10px;
+    padding: 12px;
+  }
+
+  .main-content--fill {
+    padding: 6px;
   }
 }
 
-/* 小学生向けの明るくアクセシブルなテーマ（色覚対応） */
-:root {
-  /* 基本色（色覚対応） */
-  --primary-color: #0066CC;        /* 青（色覚に優しい） */
-  --primary-hover: #0052A3;
-  --secondary-color: #FF8C00;      /* オレンジ（色覚に優しい） */
-  --secondary-hover: #E67300;
-  --accent-color: #6B46C1;         /* 紫（赤緑色覚異常でも識別可能） */
-  --accent-hover: #553C9A;
-  --success-color: #059669;        /* 緑（より濃い緑で識別しやすく） */
-  --warning-color: #DC2626;        /* 赤（より濃い赤） */
-  --warning-hover: #B91C1C;
-  --error-color: #DC2626;
-  
-  /* ニュートラル色 */
-  --background-color: #f8fafc;
-  --card-color: #ffffff;
-  --text-color: #1f2937;
-  --text-secondary: #6b7280;
-  --border-color: #e5e7eb;
-  --focus-color: #2563eb;          /* 高コントラストの青 */
-  
-  /* 色覚対応の特別な色 */
-  --safe-blue: #0066CC;            /* 安全な青 */
-  --safe-orange: #FF8C00;          /* 安全なオレンジ */
-  --safe-purple: #6B46C1;          /* 安全な紫 */
-  --safe-cyan: #0891b2;            /* 安全なシアン */
-  --safe-pink: #db2777;            /* 安全なピンク */
-  --safe-yellow: #eab308;          /* 安全な黄色（背景色考慮） */
+/* 中身の幅（大きな画面で横に広がりすぎないように） */
+.page-container {
+  max-width: 1120px;
+  margin: 0 auto;
 }
 
+/* スキップリンク（キーボードで Tab を押したときだけ表示する） */
+.skip-link {
+  position: absolute;
+  top: -60px;
+  left: 8px;
+  z-index: 2000;
+  padding: 10px 16px;
+  border-radius: var(--radius-sm);
+  background: #111827;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.skip-link:focus {
+  top: 8px;
+}
+
+/* ===== ページの見出し ===== */
+.page-header {
+  margin: 0 0 20px;
+}
+
+.page-header h2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 4px;
+  font-size: 26px;
+  line-height: 1.3;
+  color: var(--color-text);
+}
+
+.page-header p {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 16px;
+}
+
+/* ===== カード ===== */
 .card {
-  background: var(--card-color);
-  border-radius: 16px;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.1);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
   padding: 20px;
   margin-bottom: 20px;
-  border: 1px solid var(--border-color);
 }
 
-/* アクセシブルボタンスタイル */
-.button-primary {
-  background: var(--primary-color);
-  color: white;
-  padding: 12px 24px;
-  border: 2px solid transparent;
-  border-radius: 12px;
-  font-size: 16px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  min-height: 44px;
-  min-width: 44px;
+.card > h3:first-child,
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 14px;
+  font-size: 20px;
+  line-height: 1.3;
+}
+
+/* ===== ボタン =====
+   ホバーの色は、マウスなどで「本当にホバーできる」ときだけ付ける。
+   （iPad ではタップしたあとホバーの見た目が残り、押したままのように見える） */
+.button-primary,
+.button-secondary,
+.button-danger,
+.button-ghost {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
+  min-height: var(--tap-min);
+  min-width: var(--tap-min);
+  padding: 10px 18px;
+  border: 2px solid transparent;
+  border-radius: var(--radius-md);
+  font-family: inherit;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.25;
   text-decoration: none;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, transform 0.1s ease;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.button-primary:hover {
-  background: var(--primary-hover);
-  transform: translateY(-2px);
-}
-
-.button-primary:focus {
-  outline: 2px solid var(--focus-color);
-  outline-offset: 2px;
-  background: var(--primary-hover);
-}
-
-.button-primary:active {
-  transform: translateY(0);
-}
-
-.button-primary:disabled {
-  background: #ccc;
-  cursor: not-allowed;
-  transform: none;
-  opacity: 0.6;
+.button-primary {
+  background: var(--color-primary);
+  color: #fff;
 }
 
 .button-secondary {
-  background: var(--secondary-color);
-  color: white;
-  padding: 12px 24px;
-  border: 2px solid transparent;
-  border-radius: 12px;
-  font-size: 16px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  min-height: 44px;
-  min-width: 44px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  text-decoration: none;
+  background: var(--color-surface);
+  color: var(--color-primary-soft-text);
+  border-color: var(--color-border-strong);
 }
 
-.button-secondary:hover {
-  background: var(--secondary-hover);
-  transform: translateY(-2px);
+.button-danger {
+  background: var(--color-surface);
+  color: var(--color-danger);
+  border-color: #e3958d;
 }
 
-.button-secondary:focus {
-  outline: 2px solid var(--focus-color);
-  outline-offset: 2px;
-  background: var(--secondary-hover);
+.button-ghost {
+  background: transparent;
+  color: var(--color-text);
 }
 
-.button-secondary:active {
-  transform: translateY(0);
+@media (hover: hover) {
+  .button-primary:hover:not(:disabled) {
+    background: var(--color-primary-hover);
+  }
+
+  .button-secondary:hover:not(:disabled) {
+    background: var(--color-primary-soft);
+    border-color: var(--color-primary);
+  }
+
+  .button-danger:hover:not(:disabled) {
+    background: var(--color-danger-soft);
+    border-color: var(--color-danger);
+  }
+
+  .button-ghost:hover:not(:disabled) {
+    background: rgba(29, 78, 216, 0.08);
+  }
 }
 
-.button-secondary:disabled {
-  background: #ccc;
+.button-primary:active:not(:disabled),
+.button-secondary:active:not(:disabled),
+.button-danger:active:not(:disabled),
+.button-ghost:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.button-primary:disabled,
+.button-secondary:disabled,
+.button-danger:disabled,
+.button-ghost:disabled {
+  opacity: 0.5;
   cursor: not-allowed;
   transform: none;
 }
 
-/* 高コントラストモード対応 */
-@media (prefers-contrast: high) {
-  :root {
-    --text-color: #000000;
-    --background-color: #ffffff;
-    --border-color: #000000;
-  }
-  
-  .button-primary,
-  .button-secondary {
-    border: 3px solid #000;
-  }
-  
-  .card {
-    border: 2px solid #000;
+.button-large {
+  min-height: 60px;
+  padding: 14px 26px;
+  font-size: 19px;
+  border-radius: var(--radius-lg);
+}
+
+/* ===== タグなどの小さな切り替えボタン ===== */
+.chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 6px 16px;
+  border: 2px solid var(--color-border-strong);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 選ばれているものは塗りつぶしと ✓ で示す（色だけに頼らない） */
+.chip[aria-pressed='true'] {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #fff;
+}
+
+.chip[aria-pressed='true']::before {
+  content: '✓';
+  font-weight: 800;
+}
+
+@media (hover: hover) {
+  .chip:hover:not([aria-pressed='true']) {
+    border-color: var(--color-primary);
+    background: var(--color-primary-soft);
   }
 }
 
-/* ダークモード対応 */
-@media (prefers-color-scheme: dark) {
+/* 表示だけのタグ */
+.tag-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  border-radius: var(--radius-pill);
+  background: var(--color-primary-soft);
+  color: var(--color-primary-soft-text);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.6;
+}
+
+/* ===== 入力欄 ===== */
+.text-field {
+  width: 100%;
+  min-height: var(--tap-min);
+  padding: 10px 14px;
+  border: 2px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-family: inherit;
+  font-size: 17px;
+}
+
+.text-field:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.2);
+}
+
+.field-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.field-help {
+  margin: 6px 0 0;
+  font-size: 14px;
+  color: var(--color-text-muted);
+}
+
+/* ===== お知らせ ===== */
+.notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-muted);
+  font-size: 15px;
+}
+
+.notice-info {
+  background: var(--color-primary-soft);
+  border-color: #b9c8f5;
+  color: var(--color-primary-soft-text);
+}
+
+.notice-success {
+  background: var(--color-success-soft);
+  border-color: #a6dcbf;
+  color: var(--color-success);
+}
+
+.notice-warning {
+  background: var(--color-warning-soft);
+  border-color: #f2cf96;
+  color: var(--color-warning);
+}
+
+/* 何もないときの案内 */
+.empty-state {
+  padding: 32px 20px;
+  border: 2px dashed var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+.empty-state p {
+  margin: 4px 0;
+}
+
+/* 高コントラストモード対応 */
+@media (prefers-contrast: more) {
   :root {
-    --background-color: #121212;
-    --card-color: #1e1e1e;
-    --text-color: #ffffff;
-    --text-secondary: #cccccc;
-    --border-color: #444444;
+    --color-text: #000000;
+    --color-text-muted: #1f2937;
+    --color-border: #4b5563;
+    --color-border-strong: #111827;
   }
-  
-  .App {
-    background-color: var(--background-color);
-    color: var(--text-color);
+
+  .button-secondary,
+  .button-danger,
+  .chip,
+  .card {
+    border-width: 2px;
   }
 }
 
 /* 動きを抑制する設定 */
 @media (prefers-reduced-motion: reduce) {
   .button-primary,
-  .button-secondary {
+  .button-secondary,
+  .button-danger,
+  .button-ghost {
     transition: none;
   }
-  
-  .button-primary:hover,
-  .button-secondary:hover {
+
+  .button-primary:active,
+  .button-secondary:active,
+  .button-danger:active,
+  .button-ghost:active {
     transform: none;
   }
 }
@@ -208,9 +460,9 @@
   max-width: 560px;
   margin: 40px auto;
   padding: 24px;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: #fff4f4;
-  border: 2px solid #d32f2f;
+  border: 2px solid var(--color-danger);
   color: #5f1212;
   text-align: center;
 }
@@ -220,7 +472,7 @@
 }
 
 .error-boundary button {
-  min-height: 44px;
+  min-height: var(--tap-min);
   padding: 10px 20px;
   font-size: 16px;
 }

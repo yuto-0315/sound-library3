@@ -23,12 +23,10 @@ describe('Accessibility Tests', () => {
       // ナビゲーションロールが存在する
       expect(screen.getByRole('navigation')).toBeInTheDocument();
       
-      // メニューバーが存在する
-      expect(screen.getByRole('menubar')).toBeInTheDocument();
-      
-      // 全てのナビゲーションリンクがmenuitem roleを持つ
-      const menuItems = screen.getAllByRole('menuitem');
-      expect(menuItems).toHaveLength(4);
+      // ページへのリンクがリストで並んでいる（menubar はアプリのメニュー用なので使わない）
+      expect(screen.queryByRole('menubar')).not.toBeInTheDocument();
+      expect(screen.getByRole('list')).toBeInTheDocument();
+      expect(screen.getAllByRole('link')).toHaveLength(4);
     });
 
     test('has proper aria labels and descriptions', () => {
@@ -45,7 +43,7 @@ describe('Accessibility Tests', () => {
       renderWithRouter(<Navigation />);
       
       // アクティブなページがaria-current=\"page\"を持つ
-      const activeLink = screen.getByRole('menuitem', { current: 'page' });
+      const activeLink = screen.getByRole('link', { current: 'page' });
       expect(activeLink).toBeInTheDocument();
     });
   });
@@ -121,11 +119,10 @@ describe('Accessibility Tests', () => {
     test('navigation links have proper keyboard support', () => {
       renderWithRouter(<Navigation />);
       
-      // 全てのナビゲーションリンクがtabindex属性を持つ
-      const links = screen.getAllByRole('menuitem');
+      // すべてのリンクに Tab で移動できる（tabindex="-1" で飛ばされるものが無い）
+      const links = screen.getAllByRole('link');
       links.forEach(link => {
-        const tabIndex = link.getAttribute('tabindex');
-        expect(tabIndex === '0' || tabIndex === '-1').toBeTruthy();
+        expect(link).not.toHaveAttribute('tabindex', '-1');
       });
     });
   });

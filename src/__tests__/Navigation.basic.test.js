@@ -17,9 +17,9 @@ describe('Navigation Component - Basic Tests', () => {
     renderWithRouter(<Navigation />);
     
     // ナビゲーションリンクが表示される（role指定で特定）
-    expect(screen.getByRole('menuitem', { name: /音あつめ/ })).toBeInTheDocument();
-    expect(screen.getByRole('menuitem', { name: /音ライブラリ/ })).toBeInTheDocument();
-    expect(screen.getByRole('menuitem', { name: /音楽づくり/ })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /音あつめ/ })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /音ライブラリ/ })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /音楽づくり/ })).toBeInTheDocument();
   });
 
   test('has proper navigation structure', () => {
@@ -28,8 +28,8 @@ describe('Navigation Component - Basic Tests', () => {
     // ナビゲーション要素が存在する
     expect(screen.getByRole('navigation')).toBeInTheDocument();
     
-    // メニューバーが存在する
-    expect(screen.getByRole('menubar')).toBeInTheDocument();
+    // ページへのリンクがリストで並んでいる
+    expect(screen.getByRole('list')).toBeInTheDocument();
   });
 
   test('displays app title', () => {

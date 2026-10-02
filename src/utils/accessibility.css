@@ -176,25 +176,6 @@
   }
 }
 
-/* カラースキーム対応 */
-@media (prefers-color-scheme: dark) {
-  .accessible-button {
-    background: #1976D2;
-  }
-  
-  .accessible-button--secondary {
-    background: #333;
-    color: #fff;
-    border-color: #666;
-  }
-  
-  .accessible-input {
-    background: #333;
-    color: #fff;
-    border-color: #666;
-  }
-}
-
 /* エラーメッセージ */
 .error-message {
   color: #D32F2F;

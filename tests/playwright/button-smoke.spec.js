@@ -2,12 +2,13 @@ const { test, expect } = require('@playwright/test');
 const fs = require('fs');
 const path = require('path');
 
-// pages to visit in order
+// pages to visit in order（HashRouter なので # の後ろがページ。以前は存在しない /sound-library を開いていた）
+const BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:5050';
 const PAGES = [
-  '/',
-  '/sound-library',
-  '/cloud',
-  '/daw'
+  '/#/',
+  '/#/library',
+  '/#/cloud',
+  '/#/daw'
 ];
 
 // selectors of common buttons to try click (will be attempted if present)
@@ -44,7 +45,7 @@ test('button smoke test - click common buttons and check console', async ({ page
   const report = [];
 
   for (const route of PAGES) {
-    const url = `http://localhost:5000${route}`;
+    const url = `${BASE_URL}${route}`;
     await page.goto(url, { waitUntil: 'load' });
 
     const messages = [];

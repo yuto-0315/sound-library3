@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Globe, Library, Mic, Music, Piano } from 'lucide-react';
 import Icon from './Icon';
@@ -52,55 +52,18 @@ const PAGE_TITLES = {
   '/admin': '先生用管理ページ'
 };
 
+// サイト内のページ移動は、ふつうのリンクの並びにする。
+// （以前は role="menubar" で、矢印キーで項目を移動し、スペースキーでページが切り替わっていた。
+//   menubar はアプリのメニュー用の役割で、読み上げでも「メニューバー」と案内されて分かりにくい）
 const Navigation = () => {
   const location = useLocation();
-  const linkRefs = useRef([]);
   const activeIndex = NAV_ITEMS.findIndex((item) => item.activePaths.includes(location.pathname));
-  // menubar は Tab で 1 回だけ止まり、中の移動は矢印キーで行う（roving tabindex）
-  const [focusIndex, setFocusIndex] = useState(null);
-  const tabStopIndex = focusIndex !== null ? focusIndex : Math.max(activeIndex, 0);
-
-  const focusItem = (index) => {
-    const nextIndex = (index + NAV_ITEMS.length) % NAV_ITEMS.length;
-    setFocusIndex(nextIndex);
-    if (linkRefs.current[nextIndex]) linkRefs.current[nextIndex].focus();
-  };
-
-  const handleKeyDown = (event, index) => {
-    switch (event.key) {
-      case 'ArrowRight':
-      case 'ArrowDown':
-        event.preventDefault();
-        focusItem(index + 1);
-        break;
-      case 'ArrowLeft':
-      case 'ArrowUp':
-        event.preventDefault();
-        focusItem(index - 1);
-        break;
-      case 'Home':
-        event.preventDefault();
-        focusItem(0);
-        break;
-      case 'End':
-        event.preventDefault();
-        focusItem(NAV_ITEMS.length - 1);
-        break;
-      case ' ':
-        // メニュー項目はスペースキーでも開けるようにする（リンクの標準動作は Enter のみ）
-        event.preventDefault();
-        event.currentTarget.click();
-        break;
-      default:
-        break;
-    }
-  };
 
   return (
     <nav className="navigation" role="navigation" aria-label="メインナビゲーション">
       <div className="nav-container">
         <h1 className="nav-title" id="app-title">
-          <Icon icon={Music} label="音符" /> 音楽づくりアプリ
+          <Icon icon={Music} label="音符" /> <span className="nav-title-text">音楽づくりアプリ</span>
         </h1>
 
         {/* 現在のページを視覚的に分からない場合のためのスクリーンリーダー用情報 */}
@@ -108,23 +71,19 @@ const Navigation = () => {
           現在のページ: {PAGE_TITLES[location.pathname] || 'ホームページ'}
         </div>
 
-        <ul className="nav-links" role="menubar">
+        <ul className="nav-links">
           {NAV_ITEMS.map((item, index) => {
             const isActive = index === activeIndex;
             return (
-              <li role="none" key={item.path}>
+              <li key={item.path}>
                 <Link
-                  ref={(element) => { linkRefs.current[index] = element; }}
                   to={item.path}
                   className={`nav-link ${isActive ? 'active' : ''}`}
-                  role="menuitem"
-                  tabIndex={index === tabStopIndex ? 0 : -1}
                   aria-current={isActive ? 'page' : undefined}
                   aria-describedby={item.descriptionId}
-                  onKeyDown={(event) => handleKeyDown(event, index)}
-                  onFocus={() => setFocusIndex(index)}
                 >
-                  <Icon icon={item.icon} label={item.iconLabel} /> {item.label}
+                  <Icon icon={item.icon} label={item.iconLabel} size={22} />
+                  <span className="nav-link-label">{item.label}</span>
                   <span id={item.descriptionId} className="sr-only">
                     {item.description}
                   </span>

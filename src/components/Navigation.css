@@ -1,93 +1,76 @@
 .navigation {
-  background: linear-gradient(135deg, var(--safe-blue) 0%, var(--safe-purple) 100%);
-  color: white;
-  padding: 15px 0;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  background: linear-gradient(120deg, #1d4ed8 0%, #4338ca 55%, #6d28d9 100%);
+  color: #fff;
+  box-shadow: 0 2px 10px rgba(16, 24, 40, 0.2);
+  /* iPad をホーム画面から開いたときなど、画面上端の切り欠きに重ならないように */
+  padding-top: env(safe-area-inset-top, 0);
 }
 
 .nav-container {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 0 20px;
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 16px;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 8px 16px;
 }
 
 .nav-title {
-  font-size: 24px;
-  font-weight: bold;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin: 0;
-  color: white;
+  font-size: 21px;
+  font-weight: 800;
+  white-space: nowrap;
+  color: #fff;
 }
 
 .nav-links {
   display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  list-style: none;
+  gap: 8px;
   margin: 0;
   padding: 0;
+  list-style: none;
 }
 
 .nav-link {
-  color: white;
-  text-decoration: none;
-  padding: 12px 20px;
-  border-radius: 25px;
-  font-size: 16px;
-  font-weight: 600;
-  transition: all 0.3s ease;
-  background: rgba(255, 255, 255, 0.1);
-  backdrop-filter: blur(10px);
-  border: 2px solid rgba(255, 255, 255, 0.2);
-  min-height: 44px;
-  min-width: 44px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 8px;
+  min-height: 52px;
+  padding: 8px 18px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  font-size: 17px;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 
-.nav-link:hover {
-  background: rgba(255, 255, 255, 0.2);
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+@media (hover: hover) {
+  .nav-link:hover:not(.active) {
+    background: rgba(255, 255, 255, 0.24);
+  }
 }
 
-.nav-link:focus {
-  outline: 2px solid var(--safe-yellow);
-  outline-offset: 1px;
-  background: rgba(255, 255, 255, 0.3);
-  border-color: var(--safe-yellow);
-}
-
+/* 今いるページ: 白く塗りつぶす（色だけでなく形でも分かるように） */
 .nav-link.active {
-  background: rgba(255, 255, 255, 0.25);
-  box-shadow: 0 4px 16px rgba(0,0,0,0.3);
-  transform: translateY(-1px);
-  border-color: rgba(255, 255, 255, 0.4);
-  position: relative;
+  background: #fff;
+  border-color: #fff;
+  color: #1e3a8a;
+  box-shadow: 0 2px 8px rgba(16, 24, 40, 0.25);
 }
 
-.nav-link.active::after {
-  content: '';
-  position: absolute;
-  bottom: -2px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 60%;
-  height: 2px;
-  background: var(--safe-yellow);
-  border-radius: 1px;
-}
-
-/* アクティブページの視覚的手がかり（色以外） */
-.nav-link.active::before {
-  content: "●";
-  margin-right: 0.25rem;
-  font-size: 0.8rem;
+.nav-link:focus-visible {
+  outline: 3px solid #facc15;
+  outline-offset: 2px;
 }
 
 /* スクリーンリーダー専用テキスト */
@@ -103,75 +86,77 @@
   border: 0;
 }
 
-/* iPad向けのレスポンシブデザイン */
-@media (max-width: 768px) {
-  .nav-container {
-    flex-direction: column;
-    gap: 15px;
-    text-align: center;
+/* 縦向きの iPad など: タイトルは記号だけにして、ページの切り替えを 1 行に収める */
+@media (max-width: 900px) {
+  .nav-title-text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
   }
-  
+
   .nav-title {
-    font-size: 20px;
+    font-size: 26px;
   }
-  
+
   .nav-links {
-    justify-content: center;
+    flex: 1;
+    justify-content: flex-end;
   }
-  
+
   .nav-link {
-    padding: 10px 16px;
-    font-size: 14px;
+    padding: 8px 14px;
+    font-size: 16px;
+  }
+}
+
+/* さらに狭い画面: アイコンの下に名前を出す */
+@media (max-width: 600px) {
+  .nav-container {
+    padding: 6px 8px;
+    gap: 8px;
+  }
+
+  .nav-links {
+    gap: 4px;
+  }
+
+  .nav-links li {
+    flex: 1;
+  }
+
+  .nav-link {
+    flex-direction: column;
+    gap: 2px;
+    width: 100%;
+    min-height: 56px;
+    padding: 6px 4px;
+    font-size: 12px;
   }
 }
 
 /* 高コントラストモード対応 */
-@media (prefers-contrast: high) {
+@media (prefers-contrast: more) {
   .navigation {
     background: #000;
     border-bottom: 3px solid #fff;
   }
-  
+
   .nav-link {
     border: 3px solid #fff;
     background: #000;
   }
-  
-  .nav-link:hover,
-  .nav-link:focus {
-    background: #333;
-  }
-  
+
   .nav-link.active {
-    background: #333;
-    border-color: #FFD700;
+    background: #fff;
+    color: #000;
   }
 }
 
-/* ダークモード対応 */
-@media (prefers-color-scheme: dark) {
-  .navigation {
-    background: linear-gradient(135deg, #2C3E50 0%, #34495E 100%);
-  }
-}
-
-/* 動きを抑制する設定 */
 @media (prefers-reduced-motion: reduce) {
   .nav-link {
     transition: none;
   }
-  
-  .nav-link:hover {
-    transform: none;
-  }
-  
-  .nav-link.active {
-    transform: none;
-  }
-}
-
-/* キーボードナビゲーション改善 */
-.nav-link:focus-visible {
-  outline: 3px solid #FFD700;
-  outline-offset: 2px;
 }

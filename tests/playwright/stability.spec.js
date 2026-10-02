@@ -3,12 +3,12 @@
 //
 // 実行方法:
 //   npm run build
-//   npm run start:static          # http://localhost:5000 で build/ を配信
+//   npm run start:static          # http://localhost:5050 で build/ を配信
 //   npm run test:e2e -- stability.spec.js
 // 配信先を変える場合は E2E_BASE_URL を指定する。
 const { test, expect } = require('@playwright/test');
 
-const BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:5000';
+const BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:5050';
 
 test.use({
   permissions: ['microphone'],

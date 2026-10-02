@@ -116,12 +116,14 @@ describe('Navigation Component', () => {
     expect(screen.getByTestId('current-path')).toHaveTextContent('/library');
   });
 
-  test('displays icons with accessible names', () => {
+  test('リンクの名前はページ名だけ（アイコンの名前や説明が混ざって 2 回読まれない）', () => {
     renderWithRouter(<Navigation />);
 
+    expect(screen.getByRole('link', { name: '音あつめ' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '音ライブラリ' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '音楽づくり' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'みんなで共有' })).toBeInTheDocument();
+    // アプリのタイトルの記号には名前がある
     expect(screen.getByLabelText('音符')).toBeInTheDocument();
-    expect(screen.getByLabelText('マイク')).toBeInTheDocument();
-    expect(screen.getByLabelText('本')).toBeInTheDocument();
-    expect(screen.getByLabelText('ピアノ')).toBeInTheDocument();
   });
 });

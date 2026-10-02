@@ -9,7 +9,6 @@ const NAV_ITEMS = [
     path: '/collection',
     activePaths: ['/', '/collection'],
     icon: Mic,
-    iconLabel: 'マイク',
     label: '音あつめ',
     descriptionId: 'collection-desc',
     description: '音を録音したりファイルをアップロードするページ'
@@ -18,7 +17,6 @@ const NAV_ITEMS = [
     path: '/library',
     activePaths: ['/library'],
     icon: Library,
-    iconLabel: '本',
     label: '音ライブラリ',
     descriptionId: 'library-desc',
     description: '収集した音素材を管理・検索するページ'
@@ -27,7 +25,6 @@ const NAV_ITEMS = [
     path: '/daw',
     activePaths: ['/daw'],
     icon: Piano,
-    iconLabel: 'ピアノ',
     label: '音楽づくり',
     descriptionId: 'daw-desc',
     description: '音素材を組み合わせて音楽を作成するページ'
@@ -36,7 +33,6 @@ const NAV_ITEMS = [
     path: '/cloud',
     activePaths: ['/cloud'],
     icon: Globe,
-    iconLabel: 'クラウド',
     label: 'みんなで共有',
     descriptionId: 'cloud-desc',
     description: '音声をアップロードしてクラスのみんなと共有するページ'
@@ -76,18 +72,20 @@ const Navigation = () => {
             const isActive = index === activeIndex;
             return (
               <li key={item.path}>
+                {/* アイコンは飾り（名前は文字で分かる）。説明はリンクの外に置き、aria-describedby で結び付ける
+                    （リンクの中に置くと名前の一部になり、読み上げで 2 回読まれていた） */}
                 <Link
                   to={item.path}
                   className={`nav-link ${isActive ? 'active' : ''}`}
                   aria-current={isActive ? 'page' : undefined}
                   aria-describedby={item.descriptionId}
                 >
-                  <Icon icon={item.icon} label={item.iconLabel} size={22} />
+                  <Icon icon={item.icon} size={22} />
                   <span className="nav-link-label">{item.label}</span>
-                  <span id={item.descriptionId} className="sr-only">
-                    {item.description}
-                  </span>
                 </Link>
+                <span id={item.descriptionId} className="sr-only">
+                  {item.description}
+                </span>
               </li>
             );
           })}

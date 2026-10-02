@@ -30,6 +30,9 @@ dist/
 ehthumbs.db
 Thumbs.db
 
+# 先生用の暗証番号（api/admin_pin.example.php をコピーして作る。git には入れない）
+api/admin_pin.php
+
 # Uploaded files (don't commit user uploads)
 api/uploads/audio/*
 !api/uploads/audio/.gitkeep

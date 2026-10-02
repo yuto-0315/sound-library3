@@ -5,7 +5,19 @@
 // v2: 音声データは assets に 1 回だけ保存し、クリップは audioRef で参照する。
 //
 // 読み込みは v1 / v2 の両方に対応する（先生ページに保存済みの過去の楽曲も開ける）。
+// テンポ（bpm）・拍子（beatsPerMeasure）・音の合わせ方（snapMode）・メトロノームは v2 に後から加えた。
+// これらが無い楽曲は既定値（120・4 拍子・拍に合わせる・メトロノームなし）で開く。
 import { dataUrlToBlob, normalizeAudioDataUrl } from './audio';
+import { toTagList, toText } from './text';
+import {
+  DEFAULT_BPM,
+  ceilToStep,
+  clampBpm,
+  floorToStep,
+  normalizeBeatsPerMeasure,
+  normalizeSnapMode,
+  roundToStep
+} from './timing';
 
 export const PROJECT_VERSION = '2.0';
 export const DEFAULT_PIXELS_PER_SECOND = 100;
@@ -23,7 +35,17 @@ const isFiniteNumber = (value) => typeof value === 'number' && isFinite(value);
 //   'used' … タイムラインで使っている音だけ（クラウド保存・自動保存）
 //   'all'  … 音素材ライブラリもすべて含める（プロジェクトファイルのバックアップ用）
 export const serializeProject = (
-  { tracks, sounds = [], pixelsPerSecond, trackNameCounter, trackIdCounter },
+  {
+    tracks,
+    sounds = [],
+    pixelsPerSecond,
+    trackNameCounter,
+    trackIdCounter,
+    bpm = DEFAULT_BPM,
+    beatsPerMeasure,
+    snapMode,
+    metronome = false
+  },
   { includeSounds = 'used' } = {}
 ) => {
   const assets = {};
@@ -62,6 +84,10 @@ export const serializeProject = (
   return {
     version: PROJECT_VERSION,
     pixelsPerSecond,
+    bpm: clampBpm(bpm),
+    beatsPerMeasure: normalizeBeatsPerMeasure(beatsPerMeasure),
+    snapMode: normalizeSnapMode(snapMode),
+    metronome: metronome === true,
     tracks: serializedTracks,
     sounds: serializedSounds,
     assets,
@@ -130,11 +156,16 @@ export const deserializeProject = (data, { findSoundByName } = {}) => {
       usedTrackIds.add(String(trackId));
 
       const clips = (Array.isArray(track.clips) ? track.clips : []).reduce((result, clip) => {
-        if (!clip || !clip.soundData || !clip.soundData.name) {
+        // 名前が文字列でない（オブジェクトなど）クリップは表示できず画面が止まるので除外する
+        if (!clip || !clip.soundData || !toText(clip.soundData.name)) {
           droppedClipCount++;
           return result;
         }
-        const metadata = soundMetadata(clip.soundData);
+        const metadata = {
+          ...soundMetadata(clip.soundData),
+          name: toText(clip.soundData.name),
+          tags: toTagList(clip.soundData.tags)
+        };
         const audioData = resolveAudioData(clip, metadata);
         const soundData = hydrate(metadata, audioData);
         if (!soundData.audioBlob) {
@@ -154,15 +185,15 @@ export const deserializeProject = (data, { findSoundByName } = {}) => {
         return result;
       }, []);
 
-      return { ...track, id: trackId, name: track.name || 'トラック', clips };
+      return { ...track, id: trackId, name: toText(track.name) || 'トラック', muted: track.muted === true, clips };
     });
 
   // ライブラリ用の音素材は Blob にしない（使う側で必要な分だけ復元する）。
   // 古い形式の楽曲は生徒のライブラリ全体を含むことがあり、全部復元すると古い iPad でメモリが足りなくなる
   const sounds = (Array.isArray(data.sounds) ? data.sounds : [])
-    .filter((sound) => sound && sound.name)
+    .filter((sound) => sound && toText(sound.name))
     .map((sound) => {
-      const metadata = soundMetadata(sound);
+      const metadata = { ...soundMetadata(sound), name: toText(sound.name), tags: toTagList(sound.tags) };
       delete metadata.audioRef;
       return { ...metadata, audioData: resolveAudioData(sound, metadata) };
     })
@@ -172,6 +203,10 @@ export const deserializeProject = (data, { findSoundByName } = {}) => {
     pixelsPerSecond: isFiniteNumber(data.pixelsPerSecond) && data.pixelsPerSecond > 0
       ? data.pixelsPerSecond
       : DEFAULT_PIXELS_PER_SECOND,
+    bpm: data.bpm === undefined ? DEFAULT_BPM : clampBpm(data.bpm),
+    beatsPerMeasure: normalizeBeatsPerMeasure(data.beatsPerMeasure),
+    snapMode: normalizeSnapMode(data.snapMode),
+    metronome: data.metronome === true,
     tracks,
     sounds,
     usedSounds: Array.from(usedSounds.values()),
@@ -208,39 +243,45 @@ export const rescaleTracks = (tracks, ratio) => tracks.map((track) => ({
   }))
 }));
 
-// トラック上でクリップ同士が重ならない開始位置を探す
-export const findNonOverlappingPosition = (trackClips, newStartTime, newDuration, excludeClipId = null, snap = (value) => value) => {
-  const otherClips = trackClips.filter((clip) => clip.id !== excludeClipId);
+// 浮動小数点の誤差で「ぴったり隣り合ったクリップ」を重なりと判定しないための余裕
+const OVERLAP_EPSILON = 1e-6;
 
-  const hasOverlap = (start) => {
-    const end = start + newDuration;
-    return otherClips.some((clip) => start < clip.startTime + clip.duration && end > clip.startTime);
-  };
-
-  if (!hasOverlap(newStartTime)) {
-    return newStartTime;
-  }
+// トラック上でクリップ同士が重ならない開始位置を探す。
+// options.step: 位置を合わせる間隔（ピクセル）。0 なら合わせない。
+//   拍に合わせるときは、ずらした先も拍の上にする（以前は前の音の終わりにぴったり付け、拍からずれていた）
+// options.direction: 'nearest'（前後で一番近い所）か 'forward'（後ろだけ。＋ボタンで順に並べるとき）
+// options.excludeClipId: 移動中の自分自身とは重なりを判定しない
+export const findFreePosition = (trackClips, desiredStart, duration, { excludeClipId = null, step = 0, direction = 'nearest' } = {}) => {
+  const others = (trackClips || []).filter((clip) => clip.id !== excludeClipId);
+  const overlaps = (start) => others.some((clip) => (
+    start < clip.startTime + clip.duration - OVERLAP_EPSILON &&
+    start + duration > clip.startTime + OVERLAP_EPSILON
+  ));
+  const desired = Math.max(0, step > 0 ? roundToStep(desiredStart, step) : desiredStart);
+  if (!overlaps(desired)) return desired;
 
   // 候補: 0 秒地点・各クリップの直後・各クリップの直前
   const candidates = [0];
-  otherClips.forEach((clip) => {
-    candidates.push(clip.startTime + clip.duration);
-    candidates.push(clip.startTime - newDuration);
+  others.forEach((clip) => {
+    const end = clip.startTime + clip.duration;
+    const before = clip.startTime - duration;
+    candidates.push(step > 0 ? ceilToStep(end, step) : end);
+    candidates.push(step > 0 ? floorToStep(before, step) : before);
   });
 
   let best = null;
   candidates.forEach((candidate) => {
-    if (candidate < 0 || hasOverlap(candidate)) return;
-    if (best === null || Math.abs(candidate - newStartTime) < Math.abs(best - newStartTime)) {
+    if (candidate < 0 || overlaps(candidate)) return;
+    if (direction === 'forward' && candidate < desired) return;
+    if (best === null || Math.abs(candidate - desired) < Math.abs(best - desired)) {
       best = candidate;
     }
   });
 
   if (best === null) {
     // 念のため: 一番後ろのクリップの直後に置く
-    best = otherClips.reduce((max, clip) => Math.max(max, clip.startTime + clip.duration), 0);
+    const lastEnd = others.reduce((max, clip) => Math.max(max, clip.startTime + clip.duration), 0);
+    best = step > 0 ? ceilToStep(lastEnd, step) : lastEnd;
   }
-  // スナップで重なりが生じる場合はスナップしない
-  const snapped = Math.max(0, snap(best));
-  return hasOverlap(snapped) ? best : snapped;
+  return best;
 };

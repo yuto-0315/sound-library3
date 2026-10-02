@@ -1,5 +1,6 @@
 // IndexedDB ヘルパー関数
 import { normalizeAudioDataUrl } from './audio';
+import { toTagList, toText } from './text';
 
 const DB_NAME = 'SoundLibraryDB';
 const DB_VERSION = 2; // バージョンアップ: 録音データストアを追加
@@ -340,7 +341,9 @@ const toStoredRecording = (recording) => {
 // 読み込んだデータの MIME 表記を中身に合わせる（旧データは mp4 でも audio/wav と書かれている）
 const fromStoredRecording = (recording) => ({
   ...recording,
-  tags: Array.isArray(recording.tags) ? recording.tags : [],
+  // 取り込んだ楽曲などから、文字列でない名前やタグが入っていても表示できるようにする
+  name: toText(recording.name, '名前のない音'),
+  tags: toTagList(recording.tags),
   audioData: recording.audioData ? normalizeAudioDataUrl(recording.audioData) : recording.audioData
 });
 

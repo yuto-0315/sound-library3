@@ -59,7 +59,7 @@ import {
   DEFAULT_CLIP_WIDTH,
   DEFAULT_PIXELS_PER_SECOND,
   deserializeProject,
-  findNonOverlappingPosition,
+  findFreePosition,
   getNextZoomLevel,
   rescaleTracks,
   serializeProject
@@ -943,7 +943,7 @@ const DAWPage = () => {
     setTracks((prev) => prev.map((track) => {
       if (!sameId(track.id, trackId)) return track;
       const snapped = Math.max(0, snapPosition(toPosition(timePosition)));
-      const startTime = findNonOverlappingPosition(track.clips, snapped, width, null, snapPosition);
+      const startTime = findFreePosition(track.clips, snapped, width, { step: pixelsPerSecondRef.current * 0.1 });
       return {
         ...track,
         clips: [...track.clips, {
@@ -963,7 +963,7 @@ const DAWPage = () => {
       const target = prev.find((track) => sameId(track.id, targetTrackId));
       if (!target) return prev;
       const snapped = Math.max(0, snapPosition(toPosition(rawStartTime)));
-      const startTime = findNonOverlappingPosition(target.clips, snapped, clip.duration, clip.id, snapPosition);
+      const startTime = findFreePosition(target.clips, snapped, clip.duration, { excludeClipId: clip.id, step: pixelsPerSecondRef.current * 0.1 });
       const { originalTrackId, ...clipData } = clip;
       const moved = { ...clipData, startTime, trackId: target.id };
       return prev.map((track) => {

@@ -4,7 +4,7 @@ import {
   PROJECT_VERSION,
   ZOOM_LEVELS,
   deserializeProject,
-  findNonOverlappingPosition,
+  findFreePosition,
   getNextZoomLevel,
   rescaleTracks,
   serializeProject
@@ -214,47 +214,98 @@ describe('rescaleTracks（ズーム時のクリップ位置）', () => {
   });
 });
 
-describe('findNonOverlappingPosition（クリップが重ならない位置）', () => {
+describe('findFreePosition（クリップが重ならない位置）', () => {
   const clips = [
     { id: 'a', startTime: 100, duration: 100 }, // 100-200
     { id: 'b', startTime: 300, duration: 100 } // 300-400
   ];
+  const overlapsAny = (position, duration) => clips.some((c) => position < c.startTime + c.duration && position + duration > c.startTime);
 
   test('重ならなければその位置のまま', () => {
-    expect(findNonOverlappingPosition(clips, 0, 100)).toBe(0);
-    expect(findNonOverlappingPosition(clips, 200, 100)).toBe(200);
-    expect(findNonOverlappingPosition([], 123, 50)).toBe(123);
+    expect(findFreePosition(clips, 0, 100)).toBe(0);
+    expect(findFreePosition(clips, 200, 100)).toBe(200);
+    expect(findFreePosition([], 123, 50)).toBe(123);
   });
 
   test('重なる場合は一番近い空き位置に置く', () => {
-    expect(findNonOverlappingPosition(clips, 150, 50)).toBe(200); // a の直後
-    expect(findNonOverlappingPosition(clips, 110, 50)).toBe(50); // a の直前
-    expect(findNonOverlappingPosition(clips, 350, 100)).toBe(400); // b の直後
+    expect(findFreePosition(clips, 150, 50)).toBe(200); // a の直後
+    expect(findFreePosition(clips, 110, 50)).toBe(50); // a の直前
+    expect(findFreePosition(clips, 350, 100)).toBe(400); // b の直後
   });
 
   test('空きが無いすき間には入れない', () => {
     // 200-300 のすき間(100)に 150 は入らない
-    const position = findNonOverlappingPosition(clips, 220, 150);
-    const end = position + 150;
-    clips.forEach((c) => {
-      expect(position < c.startTime + c.duration && end > c.startTime).toBe(false);
-    });
+    const position = findFreePosition(clips, 220, 150);
+    expect(overlapsAny(position, 150)).toBe(false);
   });
 
   test('移動中の自分自身とは重なりを判定しない', () => {
-    expect(findNonOverlappingPosition(clips, 120, 100, 'a')).toBe(120);
-  });
-
-  test('スナップで重なる場合はスナップしない', () => {
-    const snap = (value) => Math.round(value / 30) * 30;
-    const position = findNonOverlappingPosition(clips, 150, 50, null, snap);
-    const end = position + 50;
-    clips.forEach((c) => {
-      expect(position < c.startTime + c.duration && end > c.startTime).toBe(false);
-    });
+    expect(findFreePosition(clips, 120, 100, { excludeClipId: 'a' })).toBe(120);
   });
 
   test('結果は 0 以上', () => {
-    expect(findNonOverlappingPosition([{ id: 'x', startTime: 0, duration: 100 }], 10, 50)).toBe(100);
+    expect(findFreePosition([{ id: 'x', startTime: 0, duration: 100 }], 10, 50)).toBe(100);
+  });
+
+  test('ぴったり隣り合うのは重なりとみなさない（小数の誤差があっても）', () => {
+    expect(findFreePosition(clips, 200.0000000001, 100)).toBeCloseTo(200);
+    expect(findFreePosition([{ id: 'x', startTime: 0, duration: 49.99999999 }], 50, 50)).toBe(50);
+  });
+
+  describe('拍に合わせるとき（step）', () => {
+    test('置く位置を一番近い拍にそろえる', () => {
+      expect(findFreePosition([], 74, 30, { step: 50 })).toBe(50);
+      expect(findFreePosition([], 76, 30, { step: 50 })).toBe(100);
+    });
+
+    test('ずらした先も拍の上にする（前の音の終わりがずれていても次の拍へ）', () => {
+      const offBeat = [{ id: 'a', startTime: 0, duration: 130 }]; // 0-130（2.6 拍）
+      expect(findFreePosition(offBeat, 100, 40, { step: 50 })).toBe(150);
+    });
+
+    test('前に入るときも拍の上にする', () => {
+      const later = [{ id: 'a', startTime: 210, duration: 100 }];
+      // 200 に置くと重なる → 前は 210-60=150 → 拍にそろえて 150、後ろは 310→350。近い方の 150
+      expect(findFreePosition(later, 200, 60, { step: 50 })).toBe(150);
+    });
+
+    test("direction: 'forward' では後ろの空きだけを探す（＋ボタンで順に並べるとき）", () => {
+      expect(findFreePosition(clips, 110, 50, { step: 50, direction: 'forward' })).toBe(200);
+      expect(findFreePosition(clips, 110, 50, { step: 50 })).toBe(50);
+    });
+  });
+});
+
+describe('テンポ・拍子の保存', () => {
+  const tracks = [{ id: 't1', name: 'トラック 1', muted: true, clips: [clip('c1', drum, 0)] }];
+
+  test('テンポ・拍子・合わせ方・メトロノーム・ミュートを保存して読み込める', () => {
+    const data = JSON.parse(JSON.stringify(serializeProject({
+      tracks, pixelsPerSecond: 100, bpm: 90, beatsPerMeasure: 3, snapMode: 'half', metronome: true
+    })));
+    expect(data).toMatchObject({ bpm: 90, beatsPerMeasure: 3, snapMode: 'half', metronome: true });
+    const project = deserializeProject(data);
+    expect(project).toMatchObject({ bpm: 90, beatsPerMeasure: 3, snapMode: 'half', metronome: true });
+    expect(project.tracks[0].muted).toBe(true);
+  });
+
+  test('テンポなどが無い以前の楽曲は既定値で開く', () => {
+    const data = serializeProject({ tracks, pixelsPerSecond: 100 });
+    delete data.bpm;
+    delete data.beatsPerMeasure;
+    delete data.snapMode;
+    delete data.metronome;
+    data.tracks[0].muted = undefined;
+    const project = deserializeProject(data);
+    expect(project).toMatchObject({ bpm: 120, beatsPerMeasure: 4, snapMode: 'beat', metronome: false });
+    expect(project.tracks[0].muted).toBe(false);
+  });
+
+  test('不正な値は範囲内・選べる値に直す', () => {
+    const project = deserializeProject({
+      tracks: [], pixelsPerSecond: 100, bpm: 9999, beatsPerMeasure: 7, snapMode: 'quarter', metronome: 'yes'
+    });
+    expect(project).toMatchObject({ bpm: 200, beatsPerMeasure: 4, snapMode: 'beat', metronome: false });
+    expect(deserializeProject({ tracks: [], bpm: 'abc' }).bpm).toBe(120);
   });
 });

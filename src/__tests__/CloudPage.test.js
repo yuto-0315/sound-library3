@@ -80,6 +80,9 @@ const renderInRoom = async () => {
   const utils = render(<CloudPage />);
   await screen.findByRole('button', { name: /部屋を出る/ });
   await screen.findByText('みんなの太鼓');
+  // 部屋に入ったときの useEffect（自動の読み込み直しの登録）を確実に終わらせる。
+  // fetch のモックはすぐ返るので、一覧が表示された時点でまだ effect が動いていないことがある
+  await act(async () => {});
   return utils;
 };
 
@@ -220,6 +223,7 @@ describe('みんなの音', () => {
   test('30 秒ごとに読み込み直す。新しい音はすぐには並べず、押してから並べる（押そうとしたボタンがずれない）', async () => {
     const setIntervalSpy = jest.spyOn(window, 'setInterval');
     await renderInRoom();
+    await waitFor(() => expect(setIntervalSpy.mock.calls.some(([, ms]) => ms === 30000)).toBe(true));
     const [refresh] = setIntervalSpy.mock.calls.find(([, ms]) => ms === 30000);
 
     // 画面が隠れている間は読み込まない

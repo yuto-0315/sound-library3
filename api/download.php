@@ -55,8 +55,10 @@ try {
     // ダウンロード数は 1 人 1 回だけ数える。
     // 以前は「調べてから記録する」の 2 段階で、同時に 2 回届くと（再生ボタンの連打など）
     // 2 回目が重複エラーになって音声を返せなかった。INSERT IGNORE で 1 回の処理にする。
-    // HEAD（中身を送らない確認だけのリクエスト）は数えない。
-    if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'HEAD') {
+    // HEAD（中身を送らない確認だけのリクエスト）と、「きく」ボタンの試し聞き（preview=1）は数えない。
+    // （以前は試し聞きしただけでダウンロード数が増え、先生が聞いた音も数えられていた）
+    $isPreview = ($_GET['preview'] ?? '') === '1';
+    if (!$isPreview && ($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'HEAD') {
         $insertHistoryStmt = $pdo->prepare("INSERT IGNORE INTO download_history (audio_uid, user_identifier) VALUES (?, ?)");
         $insertHistoryStmt->execute([$uid, $userIdentifier]);
         if ($insertHistoryStmt->rowCount() === 1) {

@@ -1,560 +1,550 @@
-.cloud-page {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 20px;
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-}
+/* みんなで共有ページ（どの指定も .cloud-page の中だけに効かせる。
+   以前は .search-input・.tag・.room-info などがほかのページの見た目まで変えていた） */
 
-/* 部屋参加 */
-.room-join-container {
-  text-align: center;
-  max-width: 400px;
-  margin: 60px auto;
-  padding: 40px;
-  background: white;
-  border-radius: 12px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
-}
-
-.room-join-container h2 {
-  color: #2c3e50;
-  margin-bottom: 10px;
-  font-size: 1.8rem;
-}
-
-.room-join-container p {
-  color: #7f8c8d;
-  margin-bottom: 30px;
-}
-
-.room-join-form {
+/* ===== 部屋に入る ===== */
+.cloud-page .cloud-join-card {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 10px;
+  max-width: 520px;
 }
 
-.room-input {
-  width: 100%;
-  padding: 15px;
-  font-size: 1.2rem;
-  border: 2px solid #e1e8ed;
-  border-radius: 8px;
-  text-align: center;
-  transition: border-color 0.3s ease;
+.cloud-page .cloud-room-input {
+  max-width: 240px;
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
 }
 
-.room-input:focus {
-  outline: none;
-  border-color: #3498db;
+.cloud-page .cloud-join-button {
+  align-self: flex-start;
+  margin-top: 6px;
 }
 
-.join-button {
-  background: linear-gradient(135deg, #3498db, #2980b9);
-  color: white;
-  border: none;
-  padding: 15px 30px;
-  font-size: 1.1rem;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  font-weight: 600;
-}
-
-.join-button:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 15px rgba(52, 152, 219, 0.3);
-}
-
-.join-button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-/* ヘッダー */
-.cloud-header {
+/* ===== 部屋の中 ===== */
+.cloud-page .cloud-header {
   display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
   justify-content: space-between;
-  align-items: center;
-  margin-bottom: 30px;
-  padding: 20px;
-  background: white;
-  border-radius: 12px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+  gap: 10px 20px;
 }
 
-.cloud-header h2 {
-  color: #2c3e50;
+.cloud-page .cloud-room-badge {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 6px 6px 6px 16px;
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+}
+
+.cloud-page .cloud-room-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 17px;
+  overflow-wrap: anywhere;
+}
+
+.cloud-page .cloud-room-name strong {
+  font-size: 20px;
+}
+
+.cloud-page .cloud-room-subname {
+  color: var(--color-text-muted);
+  font-size: 15px;
+}
+
+.cloud-page .cloud-leave-button {
+  min-height: 44px;
+}
+
+/* タブ */
+.cloud-page .cloud-tabs {
+  display: flex;
+  gap: 6px;
+  margin: 0 0 16px;
+  border-bottom: 2px solid var(--color-border);
+}
+
+.cloud-page .cloud-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 52px;
+  padding: 8px 20px;
+  margin-bottom: -2px;
+  border: 2px solid transparent;
+  border-bottom: none;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-family: inherit;
+  font-size: 17px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.cloud-page .cloud-tab.active {
+  border-color: var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-primary-soft-text);
+  box-shadow: inset 0 4px 0 var(--color-primary);
+}
+
+.cloud-page .cloud-tab-count {
+  min-width: 28px;
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-muted);
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+  font-size: 14px;
+  text-align: center;
+}
+
+.cloud-page .cloud-tab.active .cloud-tab-count {
+  background: var(--color-primary-soft);
+  border-color: #b9c8f5;
+  color: var(--color-primary-soft-text);
+}
+
+/* ===== みんなの音 ===== */
+.cloud-page .cloud-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px 16px;
+  margin-bottom: 14px;
+}
+
+.cloud-page .cloud-search {
+  flex: 1 1 300px;
+  min-width: 0;
+}
+
+.cloud-page .field-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cloud-page .cloud-tag-filter {
+  flex: 1 1 100%;
+}
+
+.cloud-page .cloud-new-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: var(--tap-min);
+  margin: 0 0 14px;
+  padding: 10px 16px;
+  border: 2px solid #b9c8f5;
+  border-radius: var(--radius-md);
+  background: var(--color-primary-soft);
+  color: var(--color-primary-soft-text);
+  font-family: inherit;
+  font-size: 16px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.cloud-page .cloud-notice {
+  align-items: center;
+  margin: 0 0 14px;
+  font-size: 15px;
+}
+
+.cloud-page .cloud-notice-text {
+  flex: 1;
+}
+
+.cloud-page .cloud-notice-close {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.cloud-page .error-message {
+  margin: 0 0 14px;
+  font-size: 15px;
+}
+
+.cloud-page .cloud-loading {
+  padding: 32px 0;
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+.cloud-page .cloud-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.cloud-page .cloud-empty p {
   margin: 0;
 }
 
-.room-info {
-  display: flex;
-  align-items: center;
-  gap: 15px;
-  font-weight: 500;
-  color: #34495e;
-}
-
-.leave-button {
-  background: #e74c3c;
-  color: white;
-  border: none;
-  padding: 8px 16px;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: background 0.3s ease;
-  font-size: 0.9rem;
-}
-
-.leave-button:hover {
-  background: #c0392b;
-}
-
-/* セクション共通 */
-.upload-section,
-.search-section,
-.audio-list-section {
-  background: white;
-  border-radius: 12px;
-  padding: 25px;
-  margin-bottom: 25px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-}
-
-.upload-section h3,
-.audio-list-section h3 {
-  color: #2c3e50;
-  margin-bottom: 20px;
-  font-size: 1.3rem;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-/* アップロードフォーム */
-.upload-form {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-
-.form-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 20px;
-}
-
-.form-group {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.form-group label {
-  font-weight: 600;
-  color: #34495e;
-  font-size: 0.95rem;
-}
-
-.text-input,
-.tag-input,
-.search-input {
-  padding: 12px;
-  border: 2px solid #e1e8ed;
-  border-radius: 6px;
-  font-size: 1rem;
-  transition: border-color 0.3s ease;
-}
-
-.text-input:focus,
-.tag-input:focus,
-.search-input:focus {
-  outline: none;
-  border-color: #3498db;
-}
-
-/* タグ関連 */
-.tag-input-container {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-}
-
-.tag-add-button {
-  background: #27ae60;
-  color: white;
-  border: none;
-  padding: 12px 16px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 0.9rem;
-  white-space: nowrap;
-  transition: background 0.3s ease;
-}
-
-.tag-add-button:hover {
-  background: #229954;
-}
-
-.tags-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+.cloud-page .cloud-empty .button-primary {
   margin-top: 10px;
 }
 
-.tag {
-  background: #ecf0f1;
-  color: #2c3e50;
-  padding: 6px 12px;
-  border-radius: 20px;
-  font-size: 0.85rem;
-  display: flex;
-  align-items: center;
-  gap: 6px;
+.cloud-page .cloud-count {
+  margin: 0 0 10px;
+  color: var(--color-text-muted);
+  font-weight: 700;
 }
 
-.tag-remove {
-  background: #e74c3c;
-  color: white;
+.cloud-page .cloud-sound-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cloud-page .cloud-sound-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.cloud-page .cloud-sound-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.cloud-page .cloud-play-button {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
   border: none;
   border-radius: 50%;
-  width: 18px;
-  height: 18px;
+  background: #15803d;
+  color: #fff;
   cursor: pointer;
-  font-size: 0.7rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  box-shadow: var(--shadow-sm);
 }
 
-.upload-button {
-  background: linear-gradient(135deg, #27ae60, #229954);
-  color: white;
-  border: none;
-  padding: 15px 30px;
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 1.1rem;
-  font-weight: 600;
-  align-self: flex-start;
-  transition: all 0.3s ease;
+.cloud-page .cloud-play-button.playing {
+  background: #b45309;
 }
 
-.upload-button:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 15px rgba(39, 174, 96, 0.3);
-}
-
-.upload-button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-/* 検索セクション */
-.search-controls {
-  display: flex;
-  gap: 15px;
-  align-items: center;
-}
-
-.search-input {
+.cloud-page .cloud-sound-body {
   flex: 1;
-  max-width: 300px;
+  min-width: 0;
 }
 
-.search-button {
-  background: #3498db;
-  color: white;
-  border: none;
-  padding: 12px 20px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 1rem;
-  transition: background 0.3s ease;
+.cloud-page .cloud-sound-body h4 {
+  margin: 0 0 4px;
+  font-size: 18px;
+  line-height: 1.35;
+  /* 長い名前（ファイル名など）でもカードからはみ出させない */
+  overflow-wrap: anywhere;
 }
 
-.search-button:hover {
-  background: #2980b9;
-}
-
-/* 音声ファイル一覧 */
-.no-files {
-  text-align: center;
-  color: #7f8c8d;
-  font-style: italic;
-  padding: 40px 20px;
-}
-
-.audio-list {
-  display: grid;
-  gap: 15px;
-}
-
-.audio-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 20px;
-  background: #f8f9fa;
-  border-radius: 8px;
-  border-left: 4px solid #3498db;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-
-.audio-item:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-}
-
-.audio-info {
-  flex: 1;
-}
-
-.audio-info h4 {
-  margin: 0 0 8px 0;
-  color: #2c3e50;
-  font-size: 1.1rem;
-}
-
-.audio-details {
+.cloud-page .cloud-sound-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 15px;
-  margin-bottom: 8px;
+  gap: 4px 14px;
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 14px;
 }
 
-.audio-details span {
-  color: #7f8c8d;
-  font-size: 0.9rem;
+.cloud-page .cloud-sound-meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  overflow-wrap: anywhere;
 }
 
-.audio-tags {
+.cloud-page .cloud-tags {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
 }
 
-.audio-tag {
-  background: #3498db;
-  color: white;
-  padding: 3px 8px;
-  border-radius: 12px;
-  font-size: 0.8rem;
+.cloud-page .cloud-add-button {
+  width: 100%;
 }
 
-.audio-actions {
+.cloud-page .cloud-add-button.added {
+  border-color: #a6dcbf;
+  background: var(--color-success-soft);
+  color: var(--color-success);
+  opacity: 1;
+  cursor: default;
+}
+
+/* ===== 自分の音を共有する ===== */
+.cloud-page .cloud-share-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.cloud-page .cloud-step {
+  margin-bottom: 0;
+}
+
+.cloud-page .cloud-step-title {
   display: flex;
-  gap: 10px;
   align-items: center;
+  gap: 10px;
+  margin: 0 0 14px;
+  font-size: 19px;
 }
 
-.play-button {
-  background: #3498db;
-  color: white;
-  border: none;
-  padding: 10px 14px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 1.2rem;
-  transition: all 0.3s ease;
-  display: flex;
+.cloud-page .cloud-step-number {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 44px;
-  height: 44px;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  color: #fff;
+  font-size: 17px;
+  font-weight: 800;
 }
 
-.play-button:hover {
-  background: #2980b9;
-  transform: scale(1.05);
+.cloud-page .cloud-picker-search {
+  margin-bottom: 10px;
 }
 
-.play-button:active {
-  transform: scale(0.95);
+.cloud-page .cloud-picker-none {
+  margin: 8px 0;
+  color: var(--color-text-muted);
 }
 
-.download-button {
-  background: #27ae60;
-  color: white;
-  border: none;
-  padding: 10px 16px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 0.9rem;
-  transition: background 0.3s ease;
-  white-space: nowrap;
-}
-
-.download-button:hover {
-  background: #229954;
-}
-
-/* エラーメッセージ */
-.cloud-page .error-message {
-  background: #fff5f5;
-  color: #e53e3e;
-  padding: 15px;
-  border-radius: 8px;
-  border-left: 4px solid #e53e3e;
-  margin-top: 15px;
-  font-weight: 500;
-}
-
-/* レスポンシブ対応 */
-@media (max-width: 768px) {
-  .cloud-page {
-    padding: 15px;
-  }
-  
-  .cloud-header {
-    flex-direction: column;
-    gap: 15px;
-    text-align: center;
-  }
-  
-  .form-row {
-    grid-template-columns: 1fr;
-  }
-  
-  .search-controls {
-    flex-direction: column;
-    align-items: stretch;
-  }
-  
-  .audio-item {
-    flex-direction: column;
-    gap: 15px;
-    align-items: stretch;
-  }
-  
-  .audio-actions {
-    justify-content: center;
-  }
-  
-  .audio-details {
-    justify-content: center;
-  }
-}
-
-@media (max-width: 480px) {
-  .room-join-container {
-    margin: 20px auto;
-    padding: 25px;
-  }
-  
-  .audio-details {
-    flex-direction: column;
-    gap: 8px;
-  }
-}
-
-/* 音ライブラリー選択 */
-.library-selection {
-  background: #f8f9fa;
-  border: 2px solid #e9ecef;
-  border-radius: 8px;
-  padding: 20px;
-  margin-bottom: 20px;
-}
-
-.library-selection h4 {
-  margin: 0 0 15px 0;
-  color: #2c3e50;
-  font-size: 1.1rem;
-}
-
-.library-search {
-  margin-bottom: 15px;
-}
-
-.library-tag-filters {
+/* 自分の音の一覧（多くても画面を埋めないよう、この中だけスクロールする） */
+.cloud-page .cloud-picker-list {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 8px;
-  margin-top: 10px;
-}
-
-.tag-filter-btn {
-  background: #ffffff;
-  border: 1px solid #dee2e6;
-  border-radius: 20px;
-  padding: 6px 12px;
-  font-size: 0.85rem;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.tag-filter-btn:hover {
-  background: #f8f9fa;
-  border-color: #3498db;
-}
-
-.tag-filter-btn.active {
-  background: #3498db;
-  border-color: #3498db;
-  color: white;
-}
-
-.library-sounds-list {
-  max-height: 300px;
+  max-height: 380px;
+  padding: 3px;
   overflow-y: auto;
-  border: 1px solid #dee2e6;
-  border-radius: 6px;
-  background: white;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
-.library-sound-item {
+.cloud-page .cloud-picker-item {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 12px 15px;
-  border-bottom: 1px solid #f1f3f4;
+  gap: 10px;
+  flex-shrink: 0;
+  padding: 6px 10px;
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.cloud-page .cloud-picker-item.selected {
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
+}
+
+.cloud-page .cloud-mini-play {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: none;
+  border-radius: 50%;
+  background: #15803d;
+  color: #fff;
   cursor: pointer;
-  transition: background-color 0.2s ease;
 }
 
-.library-sound-item:hover {
-  background: #f8f9fa;
+.cloud-page .cloud-mini-play.playing {
+  background: #b45309;
 }
 
-.library-sound-item.selected {
-  background: #e3f2fd;
-  border-left: 4px solid #2196f3;
-}
-
-.library-sound-item:last-child {
-  border-bottom: none;
-}
-
-.sound-info h5 {
-  margin: 0 0 5px 0;
-  color: #2c3e50;
-  font-size: 0.95rem;
-}
-
-.sound-tags {
+.cloud-page .cloud-picker-label {
+  flex: 1;
+  min-width: 0;
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
+  align-items: center;
+  gap: 10px;
+  min-height: var(--tap-min);
+  cursor: pointer;
 }
 
-.tag.small {
-  background: #e9ecef;
-  color: #6c757d;
-  border-radius: 10px;
-  padding: 2px 8px;
-  font-size: 0.75rem;
+.cloud-page .cloud-picker-label input[type='radio'] {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  margin: 0;
+  accent-color: var(--color-primary);
 }
 
-.mini-audio-player {
-  width: 150px;
+.cloud-page .cloud-picker-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.cloud-page .cloud-picker-name {
+  font-size: 16px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.cloud-page .cloud-picker-meta {
+  color: var(--color-text-muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.cloud-page .cloud-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.cloud-page .cloud-field .field-help {
+  margin: 0;
+}
+
+.cloud-page .cloud-tags-editable {
+  margin: 0 0 4px;
+}
+
+.cloud-page .cloud-tag-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
   height: 30px;
+  margin: -4px -6px -4px 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
 }
 
-.no-sounds {
-  text-align: center;
-  padding: 30px;
-  color: #6c757d;
-  font-style: italic;
+.cloud-page .cloud-tag-row {
+  display: flex;
+  gap: 8px;
+}
+
+.cloud-page .cloud-tag-row .text-field {
+  flex: 1;
+  min-width: 0;
+}
+
+.cloud-page .cloud-share-submit {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--color-border);
+}
+
+.cloud-page .cloud-share-summary {
+  margin: 0;
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
+
+.cloud-page .cloud-share-button {
+  width: 100%;
+}
+
+.cloud-page .cloud-share-submit .error-message {
+  margin: 0;
+}
+
+.cloud-page .cloud-share-done {
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.cloud-page .cloud-share-done .cloud-notice-text {
+  flex: 1 1 200px;
+}
+
+@media (hover: hover) {
+  .cloud-page .cloud-tab:hover:not(.active) {
+    color: var(--color-primary);
+  }
+
+  .cloud-page .cloud-picker-item:hover:not(.selected) {
+    border-color: var(--color-border-strong);
+  }
+
+  .cloud-page .cloud-new-banner:hover {
+    border-color: var(--color-primary);
+  }
+}
+
+/* iPad の縦向き・スマートフォン */
+@media (max-width: 900px) {
+  .cloud-page .cloud-share-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .cloud-page .cloud-picker-list {
+    max-height: 320px;
+  }
+}
+
+@media (max-width: 600px) {
+  .cloud-page .cloud-tab {
+    flex: 1;
+    justify-content: center;
+    padding: 8px 10px;
+    font-size: 15px;
+  }
+
+  .cloud-page .cloud-sound-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* 高コントラストモード対応 */
+@media (prefers-contrast: more) {
+  .cloud-page .cloud-sound-card,
+  .cloud-page .cloud-picker-item,
+  .cloud-page .cloud-room-badge {
+    border: 2px solid #000;
+  }
 }

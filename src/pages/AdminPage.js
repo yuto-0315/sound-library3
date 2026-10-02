@@ -5,6 +5,7 @@ import Icon from '../components/Icon';
 import { saveSongData } from '../utils/indexedDB';
 import { API_BASE_URL, fetchJson } from '../utils/api';
 import { toTagList, toText } from '../utils/text';
+import { formatDateJa } from '../utils/date';
 
 // 先生用の暗証番号（サーバーで設定しているときだけ必要。タブを閉じると忘れる）
 const ADMIN_PIN_KEY = 'sound-library-admin-pin';
@@ -41,10 +42,8 @@ const normalizeSong = (song) => ({
   group_number: toText(song.group_number)
 });
 
-const formatDate = (value) => {
-  const date = new Date(value);
-  return isNaN(date.getTime()) ? '' : date.toLocaleDateString('ja-JP');
-};
+// サーバーの日時（「2026-05-01 10:00:00」）は Safari の new Date では読めないので、共通の関数で読む
+const formatDate = formatDateJa;
 
 const formatSize = (bytes) => {
   const size = Number(bytes) || 0;
@@ -564,7 +563,7 @@ const AdminPage = () => {
                     <audio
                       controls
                       preload="none"
-                      src={`${API_BASE_URL}/download.php?uid=${encodeURIComponent(audioFile.uid)}&user_id=teacher-admin`}
+                      src={`${API_BASE_URL}/download.php?uid=${encodeURIComponent(audioFile.uid)}&preview=1`}
                       aria-label={`${audioFile.file_name}を再生`}
                     >
                       <track kind="captions" label="音声キャプション" />

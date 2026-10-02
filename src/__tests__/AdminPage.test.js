@@ -122,7 +122,8 @@ test('共有された音の一覧を開いただけでは全ファイルをダ�
   fireEvent.click(screen.getByRole('tab', { name: /共有された音 \(1\)/ }));
   const audio = document.querySelector('.audio-section audio');
   expect(audio.getAttribute('preload')).toBe('none');
-  expect(audio.getAttribute('src')).toBe('/api/download.php?uid=audio_x&user_id=teacher-admin');
+  // 先生が聞いただけでは、生徒の音の「もらった人」の数に数えない
+  expect(audio.getAttribute('src')).toBe('/api/download.php?uid=audio_x&preview=1');
   expect(screen.getByText('太鼓')).toBeInTheDocument(); // tags が null でも表示できる
 });
 

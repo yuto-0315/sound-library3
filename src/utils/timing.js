@@ -103,13 +103,22 @@ export const getTimelineMeasureCount = ({ contentEndPx = 0, bpm, beatsPerMeasure
   return Math.max(MIN_TIMELINE_MEASURES, usedMeasures + EXTRA_TIMELINE_MEASURES);
 };
 
+// 位置を「何拍目か」「何秒目か」に直して小数第 6 位で丸め、新しい幅で掛け直す。
+// 比率を掛け続けると誤差がたまり（200px が 199.999998px になる など）、
+// 拍の頭にあった音が拍からずれたり、ぴったり隣り合った音が重なりと判定されたりする。
+// 丸めた値をもとに戻すので、何度変えても同じ拍・同じ秒の上に戻る。
+export const convertUnits = (value, fromUnitPx, toUnitPx) => (
+  (Math.round((value / fromUnitPx) * 1e6) / 1e6) * toUnitPx
+);
+
 // テンポを変えたとき、置いた音が同じ拍の上に残るよう開始位置を動かす（音の長さは変えない）
-export const rescaleTracksForTempo = (tracks, oldBpm, newBpm) => {
-  const ratio = clampBpm(oldBpm) / clampBpm(newBpm);
-  if (ratio === 1) return tracks;
+export const rescaleTracksForTempo = (tracks, oldBpm, newBpm, pixelsPerSecond) => {
+  const fromBeat = beatWidthPx(oldBpm, pixelsPerSecond);
+  const toBeat = beatWidthPx(newBpm, pixelsPerSecond);
+  if (fromBeat === toBeat) return tracks;
   return tracks.map((track) => ({
     ...track,
-    clips: track.clips.map((clip) => ({ ...clip, startTime: clip.startTime * ratio }))
+    clips: track.clips.map((clip) => ({ ...clip, startTime: convertUnits(clip.startTime, fromBeat, toBeat) }))
   }));
 };
 

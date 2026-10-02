@@ -200,17 +200,26 @@ describe('getNextZoomLevel（ズーム）', () => {
 describe('rescaleTracks（ズーム時のクリップ位置）', () => {
   test('位置と長さを同じ比率で伸縮し、元のデータは変更しない', () => {
     const tracks = [{ id: 1, clips: [{ id: 1, startTime: 100, duration: 50, soundData: drum }] }];
-    const scaled = rescaleTracks(tracks, 1.5);
+    const scaled = rescaleTracks(tracks, 100, 150);
     expect(scaled[0].clips[0]).toMatchObject({ startTime: 150, duration: 75 });
     expect(scaled[0].clips[0].soundData).toBe(drum);
     expect(tracks[0].clips[0].startTime).toBe(100);
   });
 
-  test('拡大→縮小で元の位置に戻る', () => {
-    const tracks = [{ id: 1, clips: [{ id: 1, startTime: 230, duration: 70 }] }];
-    const back = rescaleTracks(rescaleTracks(tracks, 150 / 100), 100 / 150);
-    expect(back[0].clips[0].startTime).toBeCloseTo(230);
-    expect(back[0].clips[0].duration).toBeCloseTo(70);
+  test('拡大→縮小で元の位置に戻る（何度くり返しても誤差がたまらない）', () => {
+    let tracks = [{ id: 1, clips: [{ id: 1, startTime: 230, duration: 70 }] }];
+    const levels = [100, 67, 25, 400, 150, 100];
+    for (let round = 0; round < 20; round++) {
+      for (let i = 1; i < levels.length; i++) tracks = rescaleTracks(tracks, levels[i - 1], levels[i]);
+    }
+    // 2.3 × 100 のような掛け算そのものの誤差（1 兆分の 1 程度）は残るが、くり返してもたまらない
+    expect(tracks[0].clips[0].startTime).toBeCloseTo(230, 9);
+    expect(tracks[0].clips[0].duration).toBeCloseTo(70, 9);
+  });
+
+  test('倍率が同じならそのまま返す', () => {
+    const tracks = [{ id: 1, clips: [] }];
+    expect(rescaleTracks(tracks, 100, 100)).toBe(tracks);
   });
 });
 

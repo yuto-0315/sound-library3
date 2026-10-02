@@ -61,6 +61,12 @@ const clipElements = (container) => Array.from(container.querySelectorAll('.audi
 const clipNames = (container) => clipElements(container).map((clip) => clip.querySelector('.clip-name').textContent);
 const trackElements = (container) => Array.from(container.querySelectorAll('.track'));
 
+// 保存・読み込み・出力・リセットは「ファイル」の中にある
+const chooseFileMenuItem = (name) => {
+  fireEvent.click(screen.getByRole('button', { name: 'ファイル' }));
+  fireEvent.click(screen.getByRole('button', { name }));
+};
+
 const seedLibrary = async () => {
   const drumId = await addRecording({ name: 'たいこ', tags: ['楽器'], audioData: drumAudio });
   const bellId = await addRecording({ name: 'すず', tags: [], audioData: bellAudio });
@@ -307,7 +313,7 @@ describe('ドラッグ&ドロップ（マウス / iPad の長押しドラッグ�
     await waitFor(() => expect(clipNames(container)).toEqual(['たいこ']));
     const clip = clipElements(container)[0];
     expect(clip.style.width).toBe('100px'); // 1 秒 × 100px
-    expect(clip.style.left).toBe('330px'); // 0.1 秒単位にスナップ
+    expect(clip.style.left).toBe('350px'); // 拍の頭に合わせる（120 BPM・100% では 1 拍 = 50px）
     expect(clip.closest('.track')).toBe(trackElements(container)[1]);
   });
 
@@ -350,7 +356,7 @@ describe('ドラッグ&ドロップ（マウス / iPad の長押しドラッグ�
     const track = trackElements(container)[0];
     fireEvent.dragOver(track, { dataTransfer: createDataTransfer(), clientX: 210 });
     await waitFor(() => expect(container.querySelector('.drag-preview')).not.toBeNull());
-    expect(container.querySelector('.drag-preview').style.left).toBe('210px');
+    expect(container.querySelector('.drag-preview').style.left).toBe('200px'); // 影も拍の頭に合わせる
     expect(track.classList.contains('drag-over')).toBe(true);
     fireEvent.dragEnd(document);
     expect(container.querySelector('.drag-preview')).toBeNull();
@@ -380,15 +386,18 @@ describe('ドラッグ&ドロップ（マウス / iPad の長押しドラッグ�
     expect(clipElements(container)[0].style.left).toBe('100px');
   });
 
-  test('クリップの × は押せる範囲を広げない（短いクリップをドラッグしようとして消してしまわないように）', async () => {
+  test('置いた音の上には削除ボタンを置かない（ドラッグしようとして消してしまわないように）', async () => {
     await seedProject([drumClip(1, 0)]);
-    await renderDAW();
-    expect(screen.getByRole('button', { name: 'たいこを削除' })).not.toHaveClass('touch-target-expand');
+    const { container } = await renderDAW();
+    expect(clipElements(container)[0].querySelector('button')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'たいこを削除' })).not.toBeInTheDocument();
   });
 
-  test('クリップの × ボタンで削除できる', async () => {
+  test('置いた音をタップして選び、「削除」で消せる', async () => {
     await seedProject([drumClip(1, 0), bellClip(2, 200)]);
     const { container } = await renderDAW();
+    fireEvent.click(clipElements(container)[0]);
+    expect(clipElements(container)[0]).toHaveAttribute('aria-pressed', 'true');
     fireEvent.click(screen.getByRole('button', { name: 'たいこを削除' }));
     expect(clipNames(container)).toEqual(['すず']);
   });
@@ -522,16 +531,17 @@ describe('タッチ操作でのドラッグ', () => {
     expect(trackElements(container)[1].querySelector('.audio-clip').style.left).toBe('400px');
   });
 
-  test('クリップの × ボタンのタッチはドラッグにしない', async () => {
-    await seedProject([drumClip(1, 100)]);
+  test('音素材の ▶ や ＋ ボタンから始めたタッチはドラッグにしない', async () => {
+    await seedLibrary();
     const { container } = await renderDAW();
-    const removeButton = screen.getByRole('button', { name: 'たいこを削除' });
-    document.elementFromPoint = jest.fn(() => trackElements(container)[1]);
-    touchEvent('touchstart', removeButton, 10, 10);
-    const move = touchEvent('touchmove', removeButton, 80, 80);
+    const previewButton = await within(container.querySelector('.sound-panel')).findByRole('button', { name: 'すずを試聴' });
+    document.elementFromPoint = jest.fn(() => trackElements(container)[0]);
+    touchEvent('touchstart', previewButton, 10, 10);
+    const move = touchEvent('touchmove', previewButton, 80, 12);
     expect(move.defaultPrevented).toBe(false);
-    touchEvent('touchend', removeButton, 80, 80);
-    expect(trackElements(container)[0].querySelectorAll('.audio-clip')).toHaveLength(1);
+    touchEvent('touchend', previewButton, 80, 12);
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(clipElements(container)).toHaveLength(0);
   });
 });
 
@@ -539,6 +549,8 @@ describe('トラックとズーム', () => {
   test('ズームするとクリップの位置と長さが同じ比率で変わる', async () => {
     await seedProject([bellClip(1, 100)]);
     const { container } = await renderDAW();
+    // 波形を表示するために 1 回だけデコードする
+    await waitFor(() => expect(audioContext.decodeAudioData).toHaveBeenCalledTimes(1));
     fireEvent.click(screen.getByRole('button', { name: 'ズームイン（拡大）' }));
     expect(screen.getByText('150%')).toBeInTheDocument();
     const clip = clipElements(container)[0];
@@ -549,7 +561,8 @@ describe('トラックとズーム', () => {
     expect(screen.getByText('67%')).toBeInTheDocument();
     expect(parseFloat(clipElements(container)[0].style.left)).toBeCloseTo(67);
     // ズームしても音声を再デコードしない
-    expect(audioContext.decodeAudioData).not.toHaveBeenCalled();
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(audioContext.decodeAudioData).toHaveBeenCalledTimes(1);
   });
 
   test('ズームしても再生のタイミング（秒）は変わらない', async () => {
@@ -590,11 +603,12 @@ describe('保存・読み込み・出力', () => {
     await seedProject([drumClip(1, 0), drumClip(2, 200)]);
     await renderDAW();
     await waitFor(() => expect(screen.getAllByText('すず').length).toBeGreaterThan(0));
-    fireEvent.click(screen.getByRole('button', { name: /プロジェクト保存/ }));
+    chooseFileMenuItem('ファイルに保存');
     const blob = createdBlobs[createdBlobs.length - 1];
     expect(blob.type).toBe('application/json');
     const data = JSON.parse(Buffer.from(readBlobBytes(blob)).toString('utf8'));
     expect(data.version).toBe('2.0');
+    expect(data).toMatchObject({ bpm: 120, beatsPerMeasure: 4, snapMode: 'beat', metronome: false });
     expect(data.sounds.map((s) => s.name).sort()).toEqual(['すず', 'たいこ']);
     expect(Object.keys(data.assets)).toHaveLength(2);
     expect(HTMLAnchorElement.prototype.click).toHaveBeenCalled();
@@ -649,7 +663,7 @@ describe('保存・読み込み・出力', () => {
   test('音源出力は全クリップを重ねた WAV を作る', async () => {
     await seedProject([drumClip(1, 0), bellClip(2, 50)]);
     await renderDAW();
-    fireEvent.click(screen.getByRole('button', { name: /音源出力/ }));
+    chooseFileMenuItem('WAV ファイルに書き出す');
     await waitFor(() => expect(createdBlobs.some((blob) => blob.type === 'audio/wav')).toBe(true));
     const wav = createdBlobs.find((blob) => blob.type === 'audio/wav');
     const bytes = readBlobBytes(wav);
@@ -661,12 +675,20 @@ describe('保存・読み込み・出力', () => {
     const sampleAt = (index) => view.getInt16(44 + index * 4, true);
     expect(sampleAt(100)).toBe(Math.floor(0.25 * 0x7fff));
     expect(sampleAt(700)).toBe(Math.floor(0.5 * 0x7fff));
-    await waitFor(() => expect(screen.getByRole('button', { name: /音源出力/ })).not.toBeDisabled());
+    expect(await screen.findByText('WAV ファイルに書き出しました')).toBeInTheDocument();
+  });
+
+  test('ミュートしたトラックの音は書き出さない', async () => {
+    await seedProject([drumClip(1, 0)]);
+    await renderDAW();
+    fireEvent.click(screen.getByRole('button', { name: 'トラック 1をミュート' }));
+    chooseFileMenuItem('WAV ファイルに書き出す');
+    expect(screen.getByText(/出力する音声がありません/)).toBeInTheDocument();
   });
 
   test('音が無いときの音源出力は案内を表示する', async () => {
     await renderDAW();
-    fireEvent.click(screen.getByRole('button', { name: /音源出力/ }));
+    chooseFileMenuItem('WAV ファイルに書き出す');
     expect(screen.getByText(/出力する音声がありません/)).toBeInTheDocument();
   });
 });
@@ -682,10 +704,10 @@ describe('クラウド保存', () => {
   };
 
   const openDialogAndSave = async (roomNumber = '101') => {
-    fireEvent.click(screen.getByRole('button', { name: /クラウド保存/ }));
+    fireEvent.click(screen.getByRole('button', { name: '先生に送る' }));
     const dialog = screen.getByRole('dialog');
     fireEvent.change(within(dialog).getByLabelText(/部屋番号/), { target: { value: roomNumber } });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'クラウドに保存' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: '先生に送る' }));
     return dialog;
   };
 
@@ -695,7 +717,8 @@ describe('クラウド保存', () => {
     await seedProject([drumClip(1, 0), drumClip(2, 200)]);
     await renderDAW();
     await openDialogAndSave();
-    await waitFor(() => expect(window.alert).toHaveBeenCalledWith('楽曲をクラウドに保存しました！'));
+    expect(await screen.findByText(/を先生に送りました！/)).toBeInTheDocument();
+    expect(window.alert).not.toHaveBeenCalled();
     // 他のページと同じ API の置き場所（src/utils/api.js の API_BASE_URL）を使う
     expect(global.fetch.mock.calls.map(([url]) => url)).toEqual(['/api/rooms.php', '/api/songs.php']);
     const [, options] = global.fetch.mock.calls.find(([url]) => url.includes('songs'));
@@ -708,14 +731,37 @@ describe('クラウド保存', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
-  test('ダイアログには名前があり、開くとタイトル欄にフォーカスし、Esc で閉じられる', async () => {
+  test('ダイアログには名前があり、開くとタイトル欄にフォーカスし、Esc で閉じるとボタンにフォーカスが戻る', async () => {
     mockFetch();
     await renderDAW();
-    fireEvent.click(screen.getByRole('button', { name: /クラウド保存/ }));
-    const dialog = screen.getByRole('dialog', { name: /楽曲をクラウドに保存/ });
-    expect(within(dialog).getByLabelText(/楽曲タイトル/)).toHaveFocus();
-    fireEvent.keyDown(within(dialog).getByLabelText(/楽曲タイトル/), { key: 'Escape' });
+    const openButton = screen.getByRole('button', { name: '先生に送る' });
+    openButton.focus();
+    fireEvent.click(openButton);
+    const dialog = screen.getByRole('dialog', { name: /曲を先生に送る/ });
+    expect(within(dialog).getByLabelText(/曲のタイトル/)).toHaveFocus();
+    fireEvent.keyDown(within(dialog).getByLabelText(/曲のタイトル/), { key: 'Escape' });
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(openButton).toHaveFocus();
+  });
+
+  test('一度入力した名前と班は、次に開いたときに入っている', async () => {
+    mockFetch();
+    await seedProject([drumClip(1, 0)]);
+    await renderDAW();
+    fireEvent.click(screen.getByRole('button', { name: '先生に送る' }));
+    let dialog = screen.getByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText(/部屋番号/), { target: { value: '101' } });
+    fireEvent.change(within(dialog).getByLabelText('あなたの名前'), { target: { value: 'はなこ' } });
+    fireEvent.change(within(dialog).getByLabelText('班の番号'), { target: { value: '3' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: '先生に送る' }));
+    expect(await screen.findByText(/を先生に送りました！/)).toBeInTheDocument();
+    expect(storage['sound-library-student-name']).toBe('はなこ');
+    expect(storage['sound-library-group-number']).toBe('3');
+    fireEvent.click(screen.getByRole('button', { name: '先生に送る' }));
+    dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByLabelText('あなたの名前')).toHaveValue('はなこ');
+    expect(within(dialog).getByLabelText('班の番号')).toHaveValue('3');
+    expect(within(dialog).getByLabelText(/部屋番号/)).toHaveValue('101');
   });
 
   test('部屋が見つからないときはダイアログの中にエラーを表示する', async () => {
@@ -745,7 +791,7 @@ describe('クラウド保存', () => {
     global.fetch = jest.fn(() => new Promise((resolve) => { resolveRooms = resolve; }));
     await renderDAW();
     const dialog = await openDialogAndSave();
-    expect(within(dialog).getByRole('button', { name: '保存中...' })).toBeDisabled();
+    expect(within(dialog).getByRole('button', { name: /送っています/ })).toBeDisabled();
     await act(async () => {
       resolveRooms({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify({ success: false, error: 'x' })) });
     });
@@ -754,11 +800,11 @@ describe('クラウド保存', () => {
 });
 
 describe('自動保存の表示', () => {
-  test('変更すると保存待ち → 保存しましたと表示する', async () => {
+  test('変更すると保存待ち → 保存済みと表示する', async () => {
     await renderDAW();
     fireEvent.click(screen.getByRole('button', { name: /トラック追加/ }));
     expect(screen.getByText(/保存待ち|保存中/)).toBeInTheDocument();
-    expect(await screen.findByText('自動保存しました', {}, { timeout: 3000 })).toBeInTheDocument();
+    expect(await screen.findByText('保存済み', {}, { timeout: 3000 })).toBeInTheDocument();
     const saved = await getProjectAutoSave();
     expect(saved.tracks).toHaveLength(2);
   });

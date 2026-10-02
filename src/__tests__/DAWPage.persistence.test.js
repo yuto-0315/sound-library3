@@ -58,7 +58,22 @@ const renderDAW = async () => {
 const getClipNames = (container) =>
   Array.from(container.querySelectorAll('.clip-name')).map((element) => element.textContent);
 
-const getTrackHeaders = () => screen.getAllByRole('heading', { level: 4 }).filter((h) => /^トラック \d+$/.test(h.textContent));
+const getTrackHeaders = () => screen.getAllByRole('button', { name: /^トラック \d+$/ });
+
+// リセット・1つ前の作業に戻す などは「ファイル」の中にある
+const openFileMenu = () => {
+  const button = screen.getByRole('button', { name: 'ファイル' });
+  if (button.getAttribute('aria-expanded') !== 'true') fireEvent.click(button);
+};
+const clickFileMenuItem = async (name) => {
+  openFileMenu();
+  fireEvent.click(await screen.findByRole('button', { name }));
+};
+const resetProjectFromMenu = () => clickFileMenuItem(/リセット/);
+const expectNoRestoreItem = () => {
+  openFileMenu();
+  expect(screen.queryByRole('button', { name: /1つ前の作業に戻す/ })).not.toBeInTheDocument();
+};
 
 const seedLibrary = async () => {
   const drumId = await addRecording({ name: 'たいこ', tags: ['楽器'], audioData: drumAudio, createdAt: '2026-01-01T00:00:00Z' });
@@ -84,7 +99,7 @@ const projectWithClips = () => serializeProject({
 });
 
 const waitForAutoSaveCompleted = async () => {
-  expect(await screen.findByText('自動保存しました', {}, { timeout: 3000 })).toBeInTheDocument();
+  expect(await screen.findByText('保存済み', {}, { timeout: 3000 })).toBeInTheDocument();
 };
 
 describe('自動保存と復元（ページ移動でタイムラインが消える不具合の回帰テスト）', () => {
@@ -199,7 +214,7 @@ describe('自動保存と復元（ページ移動でタイムラインが消え�
     await saveProjectAutoSave(projectWithClips());
     const { container } = await renderDAW();
     await waitFor(() => expect(getClipNames(container)).toHaveLength(2));
-    fireEvent.click(screen.getByRole('button', { name: /リセット/ }));
+    await resetProjectFromMenu();
     await waitFor(() => expect(getClipNames(container)).toHaveLength(0));
     expect(window.confirm).toHaveBeenCalled();
     await waitForAutoSaveCompleted();
@@ -213,7 +228,7 @@ describe('自動保存と復元（ページ移動でタイムラインが消え�
     await saveProjectAutoSave(projectWithClips());
     const { container } = await renderDAW();
     await waitFor(() => expect(getClipNames(container)).toHaveLength(2));
-    fireEvent.click(screen.getByRole('button', { name: /リセット/ }));
+    await resetProjectFromMenu();
     expect(getClipNames(container)).toHaveLength(2);
   });
 });
@@ -247,8 +262,8 @@ describe('読み込みに失敗したとき（レビューで見つかったデ�
     await saveProjectAutoSave(original);
     failFirstSongsRead();
     await renderDAW();
-    fireEvent.click(screen.getByRole('button', { name: /リセット/ }));
-    await waitFor(() => expect(window.alert).toHaveBeenCalledWith('プロジェクトをリセットしました'));
+    await resetProjectFromMenu();
+    expect(await screen.findByText(/新しい曲を作り始めます/)).toBeInTheDocument();
     const backup = await getProjectAutoSaveBackup();
     expect(backup.tracks[0].clips).toHaveLength(2);
   });
@@ -258,7 +273,7 @@ describe('読み込みに失敗したとき（レビューで見つかったデ�
     failFirstSongsRead();
     await renderDAW();
     idb.failNextCommit(new Error('still broken'), (tx) => tx.mode === 'readwrite');
-    fireEvent.click(screen.getByRole('button', { name: /リセット/ }));
+    await resetProjectFromMenu();
     expect(await screen.findByText(/リセットを中止しました/)).toBeInTheDocument();
     expect(window.alert).not.toHaveBeenCalled();
     expect((await getProjectAutoSave()).tracks[0].clips).toHaveLength(2);
@@ -330,6 +345,7 @@ describe('自動保存の再試行と別のタブ', () => {
     const newer = serializeProject({ tracks: [{ id: 7, name: 'x', clips: [] }], pixelsPerSecond: 100 });
     newer.timestamp = Date.now() + 1000;
     await saveProjectAutoSave(newer);
+    fireEvent.click(container.querySelector('.audio-clip')); // 「たいこ」を選んでおく
     idb.openDelayMs = 30; // 読み込みに少し時間がかかる
     act(() => {
       document.dispatchEvent(new Event('visibilitychange'));
@@ -361,15 +377,15 @@ describe('1つ前の作業に戻す（バックアップの復元）', () => {
     await saveProjectAutoSave(projectWithClips());
     const { container } = await renderDAW();
     await waitFor(() => expect(getClipNames(container)).toHaveLength(2));
-    expect(screen.queryByRole('button', { name: /1つ前の作業に戻す/ })).not.toBeInTheDocument();
+    expectNoRestoreItem();
 
-    fireEvent.click(screen.getByRole('button', { name: /リセット/ }));
+    await resetProjectFromMenu();
     await waitFor(() => expect(getClipNames(container)).toHaveLength(0));
-    fireEvent.click(await screen.findByRole('button', { name: /1つ前の作業に戻す/ }));
+    await clickFileMenuItem(/1つ前の作業に戻す/);
     await waitFor(() => expect(getClipNames(container)).toEqual(['たいこ', 'すず']));
     expect((await getProjectAutoSave()).tracks[0].clips).toHaveLength(2);
 
-    fireEvent.click(screen.getByRole('button', { name: /1つ前の作業に戻す/ }));
+    await clickFileMenuItem(/1つ前の作業に戻す/);
     await waitFor(() => expect(getClipNames(container)).toHaveLength(0));
   });
 
@@ -377,12 +393,12 @@ describe('1つ前の作業に戻す（バックアップの復元）', () => {
     await saveProjectAutoSave(projectWithClips());
     const { container } = await renderDAW();
     await waitFor(() => expect(getClipNames(container)).toHaveLength(2));
-    fireEvent.click(screen.getByRole('button', { name: /リセット/ }));
+    await resetProjectFromMenu();
     await waitFor(() => expect(getClipNames(container)).toHaveLength(0));
     await act(() => new Promise((resolve) => setTimeout(resolve, 700)));
 
     idb.openDelayMs = 20; // 入れ替えに時間がかかる
-    fireEvent.click(await screen.findByRole('button', { name: /1つ前の作業に戻す/ }));
+    await clickFileMenuItem(/1つ前の作業に戻す/);
     expect(container.querySelector('.daw-main-area')).toHaveAttribute('inert');
     expect(container.querySelector('.daw-controls')).toHaveAttribute('inert');
     idb.openDelayMs = 0;
@@ -396,12 +412,12 @@ describe('1つ前の作業に戻す（バックアップの復元）', () => {
     await saveProjectAutoSave(projectWithClips());
     const { container } = await renderDAW();
     await waitFor(() => expect(getClipNames(container)).toHaveLength(2));
-    fireEvent.click(screen.getByRole('button', { name: /リセット/ }));
+    await resetProjectFromMenu();
     await waitFor(() => expect(getClipNames(container)).toHaveLength(0));
     await act(() => new Promise((resolve) => setTimeout(resolve, 700)));
     fireEvent.click(screen.getByRole('button', { name: /トラック追加/ })); // 保存待ちの変更
     idb.failNextCommit(Object.assign(new Error('quota'), { name: 'QuotaExceededError' }), (tx) => tx.mode === 'readwrite');
-    fireEvent.click(await screen.findByRole('button', { name: /1つ前の作業に戻す/ }));
+    await clickFileMenuItem(/1つ前の作業に戻す/);
     expect(await screen.findByText(/1つ前の作業に戻すのを中止しました/)).toBeInTheDocument();
     expect(getClipNames(container)).toHaveLength(0);
     expect((await getProjectAutoSaveBackup()).tracks[0].clips).toHaveLength(2); // バックアップはそのまま
@@ -409,9 +425,9 @@ describe('1つ前の作業に戻す（バックアップの復元）', () => {
 
   test('バックアップが無いときはボタンを出さない（空の作業内容をリセットしただけのとき）', async () => {
     await renderDAW();
-    fireEvent.click(screen.getByRole('button', { name: /リセット/ }));
-    await waitFor(() => expect(window.alert).toHaveBeenCalledWith('プロジェクトをリセットしました'));
-    expect(screen.queryByRole('button', { name: /1つ前の作業に戻す/ })).not.toBeInTheDocument();
+    await resetProjectFromMenu();
+    expect(await screen.findByText(/新しい曲を作り始めます/)).toBeInTheDocument();
+    expectNoRestoreItem();
   });
 
   test('先生の楽曲を開いた後でも、自分の作業に戻せる', async () => {
@@ -422,7 +438,7 @@ describe('1つ前の作業に戻す（バックアップの復元）', () => {
     }));
     const { container } = await renderDAW();
     await waitFor(() => expect(getClipNames(container)).toEqual(['先生の音']));
-    fireEvent.click(await screen.findByRole('button', { name: /1つ前の作業に戻す/ }));
+    await clickFileMenuItem(/1つ前の作業に戻す/);
     await waitFor(() => expect(getClipNames(container)).toEqual(['たいこ', 'すず']));
   });
 });

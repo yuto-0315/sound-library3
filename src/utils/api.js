@@ -53,3 +53,34 @@ export const getUserIdentifier = () => {
   }
   return identifier;
 };
+
+// 「先生に送る」「みんなで共有」で入力した名前と班（毎回入力しなくてよいように、この端末に覚えておく）
+const STUDENT_NAME_KEY = 'sound-library-student-name';
+const GROUP_NUMBER_KEY = 'sound-library-group-number';
+
+export const getSavedStudentProfile = () => {
+  try {
+    return {
+      studentName: localStorage.getItem(STUDENT_NAME_KEY) || '',
+      groupNumber: localStorage.getItem(GROUP_NUMBER_KEY) || ''
+    };
+  } catch (error) {
+    return { studentName: '', groupNumber: '' };
+  }
+};
+
+export const saveStudentProfile = ({ studentName, groupNumber } = {}) => {
+  try {
+    if (typeof studentName === 'string') {
+      if (studentName.trim()) localStorage.setItem(STUDENT_NAME_KEY, studentName.trim());
+      else localStorage.removeItem(STUDENT_NAME_KEY);
+    }
+    if (typeof groupNumber === 'string') {
+      if (groupNumber.trim()) localStorage.setItem(GROUP_NUMBER_KEY, groupNumber.trim());
+      else localStorage.removeItem(GROUP_NUMBER_KEY);
+    }
+  } catch (error) {
+    // 保存できなくても送ることはできる
+  }
+};
+

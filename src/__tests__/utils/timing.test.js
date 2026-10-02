@@ -126,17 +126,28 @@ describe('テンポを変えたときのクリップの位置', () => {
 
   test('同じ拍の上に残るよう開始位置だけを動かし、長さは変えない', () => {
     // 120 → 60: 1 拍の幅が 2 倍になる
-    const slower = rescaleTracksForTempo(tracks, 120, 60);
+    const slower = rescaleTracksForTempo(tracks, 120, 60, 100);
     expect(slower[0].clips.map((c) => c.startTime)).toEqual([200, 500]);
     expect(slower[0].clips.map((c) => c.duration)).toEqual([30, 80]);
     // 120 → 240（上限 200 に丸める）
-    const faster = rescaleTracksForTempo(tracks, 120, 200);
+    const faster = rescaleTracksForTempo(tracks, 120, 200, 100);
     expect(faster[0].clips[0].startTime).toBeCloseTo(60);
   });
 
+  test('テンポを少しずつ何度変えても、拍の上からずれない（小数の誤差がたまらない）', () => {
+    let current = tracks;
+    let bpm = 120;
+    for (let i = 0; i < 12; i++) {
+      current = rescaleTracksForTempo(current, bpm, bpm - 5, 100);
+      bpm -= 5;
+    }
+    expect(bpm).toBe(60);
+    expect(current[0].clips.map((c) => c.startTime)).toEqual([200, 500]);
+  });
+
   test('元のデータは変えず、同じテンポならそのまま返す', () => {
-    rescaleTracksForTempo(tracks, 120, 60);
+    rescaleTracksForTempo(tracks, 120, 60, 100);
     expect(tracks[0].clips[0].startTime).toBe(100);
-    expect(rescaleTracksForTempo(tracks, 120, 120)).toBe(tracks);
+    expect(rescaleTracksForTempo(tracks, 120, 120, 100)).toBe(tracks);
   });
 });

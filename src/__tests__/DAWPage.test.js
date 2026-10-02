@@ -1,8 +1,6 @@
 // 音楽づくり（DAW）ページの基本動作。
-// （以前のこのファイルはアプリに無い機能（テンポ/BPM、音量・パンのスライダー、キーボード
-//   ショートカット、再生位置スライダー）や存在しない API（fireEvent.tab など）を前提にしており、
-//   通っていたテストも中身の検証が無いものだったため書き直した。
-//   保存・再生・ドラッグの詳しい回帰テストは DAWPage.persistence / DAWPage.interaction にある）
+// 保存・再生・ドラッグの詳しい回帰テストは DAWPage.persistence / DAWPage.interaction、
+// テンポ・拍・元に戻す・選んだ音の操作などは DAWPage.music にある。
 import React from 'react';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
@@ -20,6 +18,11 @@ const renderDAW = async () => {
   await waitFor(() => expect(screen.queryByText('前回の作業内容を読み込んでいます...')).not.toBeInTheDocument());
   return utils;
 };
+
+const seedOneClip = (name = 'テスト音1') => saveProjectAutoSave(serializeProject({
+  tracks: [{ id: 1, name: 'トラック 1', clips: [{ id: 1, startTime: 0, duration: 100, trackId: 1, soundData: { name, audioData: drumAudio } }] }],
+  pixelsPerSecond: 100
+}));
 
 describe('DAWPage Component', () => {
   let audioContext;
@@ -51,29 +54,38 @@ describe('DAWPage Component', () => {
     expect(screen.getByRole('button', { name: '再生' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '停止' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /トラック追加/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '先生に送る' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /ファイル/ })).toHaveAttribute('aria-expanded', 'false');
   });
 
   test('has proper accessibility structure', async () => {
     await renderDAW();
     // アイコンだけのボタンにも読み上げ用の名前がある
-    ['再生', '停止', 'ズームイン（拡大）', 'ズームアウト（縮小）', '音素材パネルを閉じる', 'トラック 1を削除'].forEach((name) => {
+    [
+      '再生', '停止', '元に戻す', 'やり直す', 'テンポを遅くする', 'テンポを速くする',
+      'ズームイン（拡大）', 'ズームアウト（縮小）', '音素材パネルを閉じる', 'トラック 1を削除', 'トラック 1をミュート', '使い方'
+    ].forEach((name) => {
       expect(screen.getByRole('button', { name })).toBeInTheDocument();
     });
+    expect(screen.getByRole('combobox', { name: '拍子' })).toHaveValue('4');
+    expect(screen.getByRole('combobox', { name: '置き方' })).toHaveValue('beat');
+    expect(screen.getByRole('slider', { name: /再生位置/ })).toHaveAttribute('aria-valuetext', '1小節 1拍');
     fireEvent.click(screen.getByRole('button', { name: /トラック追加/ }));
-    expect(screen.getByRole('status')).toHaveTextContent(/保存/); // 自動保存の状況
+    expect(document.querySelector('.autosave-status')).toHaveTextContent(/保存/); // 自動保存の状況
   });
 
   test('displays initial track', async () => {
     await renderDAW();
-    expect(screen.getByText('トラック 1')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'トラック 1' })).toHaveAttribute('aria-pressed', 'true');
     expect(document.querySelectorAll('.track')).toHaveLength(1);
   });
 
   test('adds new track when add track button is clicked', async () => {
     await renderDAW();
     fireEvent.click(screen.getByRole('button', { name: /トラック追加/ }));
-    expect(screen.getByText('トラック 1')).toBeInTheDocument();
-    expect(screen.getByText('トラック 2')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'トラック 1' })).toBeInTheDocument();
+    // 追加したトラックが「＋で音を置くトラック」になる
+    expect(screen.getByRole('button', { name: 'トラック 2' })).toHaveAttribute('aria-pressed', 'true');
     expect(document.querySelectorAll('.track')).toHaveLength(2);
   });
 
@@ -91,7 +103,8 @@ describe('DAWPage Component', () => {
     await renderDAW();
     const panel = document.querySelector('.sound-panel');
     expect(await within(panel).findByText('テスト音1')).toBeInTheDocument();
-    expect(within(panel).getByRole('button', { name: 'test' })).toBeInTheDocument(); // タグの絞り込み
+    expect(within(panel).getByRole('button', { name: 'test' })).toHaveAttribute('aria-pressed', 'false'); // タグの絞り込み
+    expect(within(panel).getByRole('button', { name: 'すべて' })).toHaveAttribute('aria-pressed', 'true');
   });
 
   test('handles drag and drop from sound library', async () => {
@@ -104,6 +117,7 @@ describe('DAWPage Component', () => {
   });
 
   test('handles playback controls', async () => {
+    await seedOneClip();
     await renderDAW();
     fireEvent.click(screen.getByRole('button', { name: '再生' }));
     expect(screen.getByRole('button', { name: '一時停止' })).toBeInTheDocument();
@@ -111,6 +125,13 @@ describe('DAWPage Component', () => {
     expect(screen.getByRole('button', { name: '再生' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '停止' }));
     expect(screen.getByRole('button', { name: '再生' })).toBeInTheDocument();
+  });
+
+  test('音が無いときに再生を押すと、無音を鳴らし続けずに案内する', async () => {
+    await renderDAW();
+    fireEvent.click(screen.getByRole('button', { name: '再生' }));
+    expect(screen.getByRole('button', { name: '再生' })).toBeInTheDocument();
+    expect(screen.getByText(/まだ音が置かれていません/)).toBeInTheDocument();
   });
 
   test('saves and loads project data', async () => {
@@ -121,8 +142,12 @@ describe('DAWPage Component', () => {
     await renderDAW();
     await waitFor(() => expect(document.querySelectorAll('.audio-clip')).toHaveLength(1));
     expect(screen.getByText('保存した音', { selector: '.clip-name' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /プロジェクト保存/ })).toBeInTheDocument();
-    expect(screen.getByText(/プロジェクト読み込み/)).toBeInTheDocument();
+    // 保存・読み込みは「ファイル」の中にまとめた
+    fireEvent.click(screen.getByRole('button', { name: /ファイル/ }));
+    expect(screen.getByRole('button', { name: 'ファイルに保存' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'ファイルを開く' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'WAV ファイルに書き出す' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /リセット/ })).toBeInTheDocument();
   });
 
   test('handles zoom controls', async () => {
@@ -136,12 +161,11 @@ describe('DAWPage Component', () => {
   });
 
   test('handles clip manipulation', async () => {
-    await saveProjectAutoSave(serializeProject({
-      tracks: [{ id: 1, name: 'トラック 1', clips: [{ id: 1, startTime: 0, duration: 100, trackId: 1, soundData: { name: 'テスト音1', audioData: drumAudio } }] }],
-      pixelsPerSecond: 100
-    }));
+    await seedOneClip();
     await renderDAW();
     await waitFor(() => expect(document.querySelectorAll('.audio-clip')).toHaveLength(1));
+    // 置いた音をタップして選ぶと、削除ボタンが出る
+    fireEvent.click(document.querySelector('.audio-clip'));
     fireEvent.click(screen.getByRole('button', { name: 'テスト音1を削除' }));
     expect(document.querySelectorAll('.audio-clip')).toHaveLength(0);
   });
@@ -149,11 +173,14 @@ describe('DAWPage Component', () => {
   test('displays timeline with proper measurements', async () => {
     await renderDAW();
     const timeline = document.querySelector('.timeline');
-    // 5 秒ごとに目盛りの数字を表示する（0s〜90s）
-    ['0s', '5s', '45s', '90s'].forEach((label) => {
+    // 小節の番号を表示する（120 BPM・4 拍子・100% では 1 小節 = 200px）
+    ['1', '2', '3', '24'].forEach((label) => {
       expect(within(timeline).getByText(label)).toBeInTheDocument();
     });
-    expect(within(timeline).queryByText('3s')).not.toBeInTheDocument();
+    const measure2 = within(timeline).getByText('2');
+    expect(measure2.style.left).toBe('200px');
+    expect(document.querySelector('.timeline-container').style.getPropertyValue('--beat-px')).toBe('50px');
+    expect(document.querySelector('.timeline-container').style.getPropertyValue('--measure-px')).toBe('200px');
   });
 
   test('handles error states gracefully', async () => {
@@ -164,6 +191,7 @@ describe('DAWPage Component', () => {
   });
 
   test('maintains accessibility during interaction', async () => {
+    await seedOneClip();
     await renderDAW();
     const playButton = screen.getByRole('button', { name: '再生' });
     playButton.focus();
@@ -173,16 +201,16 @@ describe('DAWPage Component', () => {
     expect(screen.getByRole('button', { name: '一時停止' })).toBeInTheDocument();
   });
 
-  test('使い方を開いたり閉じたりできる（ボタンは 1 つだけで、キーボードでも二重に切り替わらない）', async () => {
+  test('使い方はダイアログで開き、Esc で閉じるとボタンにフォーカスが戻る', async () => {
     await renderDAW();
-    const toggle = screen.getByRole('button', { name: /使い方/ });
-    expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    expect(toggle.querySelector('button')).toBeNull(); // ボタンの中にボタンを入れない
-    fireEvent.click(toggle);
-    expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    expect(toggle).toHaveTextContent('折りたたむ');
-    expect(screen.getByText(/自動保存機能/)).toBeInTheDocument();
-    fireEvent.click(toggle);
-    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    const help = screen.getByRole('button', { name: '使い方' });
+    help.focus();
+    fireEvent.click(help);
+    const dialog = screen.getByRole('dialog', { name: /使い方/ });
+    expect(within(dialog).getByText(/自動保存機能/)).toBeInTheDocument();
+    expect(dialog).toContainElement(document.activeElement);
+    fireEvent.keyDown(document.activeElement, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(help).toHaveFocus();
   });
 });

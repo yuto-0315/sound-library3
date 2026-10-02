@@ -88,7 +88,16 @@ export const createMockAudioContext = ({ secondsPerByte = 0.01, failDecode = () 
     currentTime: 0,
     destination: {},
     started,
-    createBuffer: jest.fn((channels, length, sampleRate) => ({ numberOfChannels: channels, length, sampleRate, duration: length / sampleRate })),
+    createBuffer: jest.fn((channels, length, sampleRate) => {
+      const data = Array.from({ length: channels }, () => new Float32Array(length));
+      return {
+        numberOfChannels: channels,
+        length,
+        sampleRate,
+        duration: length / sampleRate,
+        getChannelData: (channel) => data[channel]
+      };
+    }),
     createBufferSource: jest.fn(() => {
       const source = {
         buffer: null,

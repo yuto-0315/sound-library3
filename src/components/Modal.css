@@ -1,0 +1,94 @@
+/* 画面の上に重ねるダイアログ（components/Modal.js） */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(15, 23, 42, 0.55);
+  /* ダイアログが画面より高いときは、背景ごとスクロールできるように */
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.modal-dialog {
+  position: relative;
+  width: 100%;
+  max-width: 520px;
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  margin: auto;
+  padding: 20px 22px;
+  border-radius: var(--radius-lg, 18px);
+  background: var(--color-surface, #fff);
+  color: var(--color-text, #1b2333);
+  box-shadow: var(--shadow-lg, 0 12px 32px rgba(16, 24, 40, 0.18));
+}
+
+.modal-dialog:focus {
+  outline: none;
+}
+
+.modal-dialog-wide {
+  max-width: 760px;
+}
+
+.modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.modal-header h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 21px;
+  line-height: 1.35;
+}
+
+.modal-close-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: none;
+  border-radius: var(--radius-pill, 999px);
+  background: var(--color-surface-muted, #f7f9fc);
+  color: var(--color-text, #1b2333);
+  font-size: 20px;
+  cursor: pointer;
+}
+
+.modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.modal-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+@media (max-width: 600px) {
+  .modal-backdrop {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .modal-dialog {
+    max-height: 92dvh;
+    border-radius: var(--radius-lg, 18px) var(--radius-lg, 18px) 0 0;
+  }
+}

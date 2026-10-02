@@ -15,6 +15,7 @@ import {
   clampBpm,
   floorToStep,
   normalizeBeatsPerMeasure,
+  convertUnits,
   normalizeSnapMode,
   roundToStep
 } from './timing';
@@ -232,16 +233,20 @@ export const getNextZoomLevel = (current, zoomIn, levels = ZOOM_LEVELS) => {
   return levels[nextIndex];
 };
 
-// クリップの位置と長さはピクセル単位なので、ズーム倍率を変えたら比率を掛けて合わせる。
+// クリップの位置と長さはピクセル単位なので、ズーム倍率（1 秒あたりのピクセル数）を変えたら合わせる。
 // 音声を再デコードしないので、クリップが多くても一瞬で終わる。
-export const rescaleTracks = (tracks, ratio) => tracks.map((track) => ({
-  ...track,
-  clips: track.clips.map((clip) => ({
-    ...clip,
-    startTime: clip.startTime * ratio,
-    duration: clip.duration * ratio
-  }))
-}));
+// 秒に直して丸めてから掛け直すので、拡大・縮小を何度くり返しても誤差がたまらない。
+export const rescaleTracks = (tracks, fromPixelsPerSecond, toPixelsPerSecond) => {
+  if (fromPixelsPerSecond === toPixelsPerSecond) return tracks;
+  return tracks.map((track) => ({
+    ...track,
+    clips: track.clips.map((clip) => ({
+      ...clip,
+      startTime: convertUnits(clip.startTime, fromPixelsPerSecond, toPixelsPerSecond),
+      duration: convertUnits(clip.duration, fromPixelsPerSecond, toPixelsPerSecond)
+    }))
+  }));
+};
 
 // 浮動小数点の誤差で「ぴったり隣り合ったクリップ」を重なりと判定しないための余裕
 const OVERLAP_EPSILON = 1e-6;

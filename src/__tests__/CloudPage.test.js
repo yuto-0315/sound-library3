@@ -80,9 +80,15 @@ const renderInRoom = async () => {
   const utils = render(<CloudPage />);
   await screen.findByRole('button', { name: /部屋を出る/ });
   await screen.findByText('みんなの太鼓');
-  // 部屋に入ったときの useEffect（自動の読み込み直しの登録）を確実に終わらせる。
-  // fetch のモックはすぐ返るので、一覧が表示された時点でまだ effect が動いていないことがある
-  await act(async () => {});
+  return utils;
+};
+
+// 部屋に入ったときの useEffect（自動の読み込み直しの登録）が終わるまで待つ。
+// fetch のモックはすぐ返るので、一覧が表示された時点ではまだ登録されていないことがある
+const renderInRoomWithAutoRefresh = async () => {
+  const addListener = jest.spyOn(document, 'addEventListener');
+  const utils = await renderInRoom();
+  await waitFor(() => expect(addListener).toHaveBeenCalledWith('visibilitychange', expect.any(Function)));
   return utils;
 };
 
@@ -254,7 +260,7 @@ describe('みんなの音', () => {
   });
 
   test('画面に戻ってきたときも読み込み直す', async () => {
-    await renderInRoom();
+    await renderInRoomWithAutoRefresh();
     const before = listGetCount();
     act(() => {
       document.dispatchEvent(new Event('visibilitychange'));
@@ -263,7 +269,7 @@ describe('みんなの音', () => {
   });
 
   test('古い読み込みの結果で、新しい一覧を上書きしない', async () => {
-    await renderInRoom();
+    await renderInRoomWithAutoRefresh();
     let resolveSlow;
     responses.list = () => new Promise((resolve) => { resolveSlow = resolve; });
     fireEvent.click(screen.getByRole('button', { name: /最新にする/ }));

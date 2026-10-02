@@ -68,6 +68,9 @@
 .daw-controls.is-loading,
 .daw-main-area.is-loading {
   opacity: 0.6;
+  /* 読み込み中は押せないようにする（inert を使えない iPadOS 15.4 以前でも、押した操作が
+     あとで読み込んだ作業内容に黙って上書きされないように） */
+  pointer-events: none;
 }
 
 .daw-toolbar {
@@ -685,6 +688,11 @@
 
 .daw-loading {
   position: absolute;
+  /* iPadOS 14.4 以前は inset が使えないので、上下左右も書く */
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   inset: 0;
   z-index: 20;
   display: flex;

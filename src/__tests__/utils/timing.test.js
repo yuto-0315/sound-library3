@@ -5,6 +5,7 @@ import {
   beatWidthPx,
   ceilToStep,
   clampBpm,
+  convertUnits,
   describePosition,
   floorToStep,
   formatDuration,
@@ -149,5 +150,27 @@ describe('テンポを変えたときのクリップの位置', () => {
     rescaleTracksForTempo(tracks, 120, 60, 100);
     expect(tracks[0].clips[0].startTime).toBe(100);
     expect(rescaleTracksForTempo(tracks, 120, 120, 100)).toBe(tracks);
+  });
+});
+
+describe('ズームしても拍の表示がずれない（レビューで発見）', () => {
+  test('テンポ 130 などでズームしても、拍の頭の音は同じ拍として表示する', () => {
+    [120, 130, 145, 150, 170, 190, 200].forEach((bpm) => {
+      for (let beat = 0; beat < 32; beat++) {
+        let pps = 100;
+        let position = beatWidthPx(bpm, pps) * beat;
+        [150, 200, 67, 400, 25, 100].forEach((nextPps) => {
+          position = convertUnits(position, pps, nextPps);
+          pps = nextPps;
+          const label = formatPosition(position, { bpm, beatsPerMeasure: 4, pixelsPerSecond: pps });
+          expect(label).toBe(`${Math.floor(beat / 4) + 1}小節 ${(beat % 4) + 1}拍`);
+        });
+      }
+    });
+  });
+
+  test('以前の丸め（小数第 6 位）で保存された位置も、拍の頭として数える', () => {
+    // テンポ 130・150% で 1小節 2拍は 69.230769px。以前は 69.2307px になり「1小節 1拍」と出た
+    expect(formatPosition(69.2307, { bpm: 130, beatsPerMeasure: 4, pixelsPerSecond: 150 })).toBe('1小節 2拍');
   });
 });

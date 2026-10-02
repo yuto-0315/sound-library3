@@ -68,6 +68,7 @@ import {
   DEFAULT_SNAP_MODE,
   beatWidthPx,
   ceilToStep,
+  floorToStep,
   clampBpm,
   convertUnits,
   describePosition,
@@ -269,6 +270,10 @@ const DAWPage = () => {
   const toastTimerRef = useRef(null);
   const isMountedRef = useRef(true);
   const pendingFocusClipIdRef = useRef(null);
+  // 消したあとなど、次に描き直したときにフォーカスを移すトラック（その音が無ければトラック名のボタン）
+  const pendingFocusTrackIdRef = useRef(null);
+  // 前のフレームのプレイヘッドの位置（再生を始めたときは null。keepPlayheadVisible で使う）
+  const playheadFollowRef = useRef(null);
 
   // 音声再生
   const audioContextRef = useRef(null);
@@ -412,8 +417,22 @@ const DAWPage = () => {
   }, [syncHistoryState]);
 
   const restoreSnapshot = (snapshot) => {
+    const previousBpm = bpmRef.current;
     // 覚えたときとズーム倍率が違えば、今の倍率に合わせる（クリップの位置はピクセルで持っている）
     const restoredTracks = rescaleTracks(snapshot.tracks, snapshot.pixelsPerSecond, pixelsPerSecondRef.current);
+    // テンポが戻るときは、再生位置も同じ拍の上に動かす（テンポを変えたときと同じ。以前は別の拍に残り、
+    // 次の「＋」が思わぬ所に置かれた）
+    if (snapshot.bpm !== previousBpm) {
+      const pps = pixelsPerSecondRef.current;
+      const position = isPlayingRef.current ? getPlaybackPositionSeconds() * pps : currentTimeRef.current;
+      const nextPosition = convertUnits(position, beatWidthPx(previousBpm, pps), beatWidthPx(snapshot.bpm, pps));
+      if (isPlayingRef.current) {
+        pendingSeekPxRef.current = nextPosition;
+      } else {
+        currentTimeRef.current = nextPosition;
+        setCurrentTime(nextPosition);
+      }
+    }
     bpmRef.current = snapshot.bpm;
     beatsPerMeasureRef.current = snapshot.beatsPerMeasure;
     tracksRef.current = restoredTracks;
@@ -576,17 +595,27 @@ const DAWPage = () => {
   };
 
   // 再生中、プレイヘッドが見える範囲から出たらタイムラインをめくる
+  // 再生中のプレイヘッドを追いかける。見えている所から右端を越えたときだけページをめくる。
+  // 自分でスクロールしてほかの所を見ているときや、音をドラッグしているときは引き戻さない
+  // （以前は毎フレーム引き戻していて、再生中はスクロールできず、ドラッグ中の自動スクロールも打ち消していた）
+  // previous が null（再生を始めた直後）なら、見えていなければプレイヘッドの所まで動かす
   const keepPlayheadVisible = (position) => {
     const container = timelineContainerRef.current;
+    const previous = playheadFollowRef.current;
+    playheadFollowRef.current = position;
     if (!container || !container.clientWidth) return;
+    if (typeof document !== 'undefined' && document.body.classList.contains('dragging')) return;
     const corner = container.querySelector('.ruler-corner');
     const headerWidth = corner ? corner.offsetWidth : 0;
     const visibleStart = container.scrollLeft;
     const visibleWidth = container.clientWidth - headerWidth;
     if (visibleWidth <= 0) return;
-    if (position > visibleStart + visibleWidth - 24 || position < visibleStart) {
-      container.scrollLeft = Math.max(0, position - 24);
-    }
+    const visibleEnd = visibleStart + visibleWidth - 24;
+    const isVisible = (value) => value >= visibleStart && value <= visibleEnd;
+    const shouldScroll = previous === null
+      ? !isVisible(position)
+      : isVisible(previous) && position > visibleEnd;
+    if (shouldScroll) container.scrollLeft = Math.max(0, position - 24);
   };
 
   // プレイヘッドは React の再描画を通さずに直接動かす。
@@ -644,17 +673,20 @@ const DAWPage = () => {
     }
   };
 
-  // 再生する範囲を決め、音を読み込んで AudioContext の時計で予約する
-  const prepareAndSchedule = (ctx, requestedOffsetSec, session, resumePromise) => {
+  // 再生する範囲を決め、音を読み込んで AudioContext の時計で予約する。
+  // fromPlayButton: 再生ボタンから（false は再生中に編集して予約し直すとき）
+  const prepareAndSchedule = (ctx, requestedOffsetSec, session, resumePromise, { fromPlayButton = false } = {}) => {
     const pps = pixelsPerSecondRef.current;
+    const placedClipCount = tracksRef.current.reduce((count, track) => count + track.clips.length, 0);
     // ミュートしたトラックの音は鳴らさない
     const allClips = tracksRef.current.filter((track) => !track.muted).flatMap((track) => track.clips);
     const lastClipEndSec = allClips.reduce(
       (max, clip) => Math.max(max, (clip.startTime + clip.duration) / pps),
       0
     );
-    // 最後の音より後ろで再生を押したら、先頭から再生する
-    const offsetSec = lastClipEndSec > 0 && requestedOffsetSec >= lastClipEndSec - 1e-6 && !metronomeRef.current
+    // 最後の音より後ろで再生を押したら、先頭から再生する。
+    // 再生中に編集したとき（ミュート・削除・テンポなど）は先頭に戻さない（以前は曲の最初から鳴り直した）
+    const offsetSec = fromPlayButton && lastClipEndSec > 0 && requestedOffsetSec >= lastClipEndSec - 1e-6 && !metronomeRef.current
       ? 0
       : Math.max(0, requestedOffsetSec);
     let endSec;
@@ -669,8 +701,14 @@ const DAWPage = () => {
     }
 
     if (endSec <= offsetSec) {
+      if (!fromPlayButton) {
+        // 再生中の編集で、この先に鳴らす音が無くなった: その場で止める
+        haltPlayback(false);
+        return;
+      }
       setError(null);
-      notify(allClips.length === 0
+      // 音はあるが、全部のトラックをミュートしているときは、そう伝える
+      notify(placedClipCount === 0
         ? 'まだ音が置かれていません。音素材をトラックに置いてから再生しましょう。'
         : '再生できる音がありません（ミュートしていないトラックに音を置きましょう）。');
       haltPlayback(false);
@@ -741,6 +779,7 @@ const DAWPage = () => {
   };
 
   const play = () => {
+    playheadFollowRef.current = null;
     const ctx = audioContextRef.current;
     if (!ctx) {
       setError('このブラウザでは音声を再生できません。');
@@ -761,7 +800,7 @@ const DAWPage = () => {
     setError(null);
     isPlayingRef.current = true;
     setIsPlaying(true);
-    prepareAndSchedule(ctx, offsetSec, session, resumePromise);
+    prepareAndSchedule(ctx, offsetSec, session, resumePromise, { fromPlayButton: true });
   };
 
   // 再生中に音を動かしたり消したりしたら、今の位置から予約し直す（以前は再生を押した時の音のまま鳴っていた）
@@ -795,8 +834,19 @@ const DAWPage = () => {
   const togglePlaybackRef = useRef(null);
   togglePlaybackRef.current = () => (isPlayingRef.current ? pause() : play());
 
+  // 再生中に音・テンポ・拍子・メトロノームを変えたら予約し直す。
+  // ズームだけのとき（位置をピクセルで持つので tracks は変わる）は、鳴る音は同じなので予約し直さない
+  // （予約し直すと音が一瞬途切れていた。予約は秒で行い、プレイヘッドは毎回いまのズームで描く）
+  const zoomedTracksRef = useRef(null);
+  const lastScheduleInputsRef = useRef({ tracks, bpm, beatsPerMeasure, metronome });
   useEffect(() => {
-    if (isPlayingRef.current) reschedulePlaybackRef.current();
+    const previous = lastScheduleInputsRef.current;
+    lastScheduleInputsRef.current = { tracks, bpm, beatsPerMeasure, metronome };
+    if (!isPlayingRef.current) return;
+    const onlyZoomed = tracks !== previous.tracks && tracks === zoomedTracksRef.current &&
+      bpm === previous.bpm && beatsPerMeasure === previous.beatsPerMeasure && metronome === previous.metronome;
+    if (onlyZoomed) return;
+    reschedulePlaybackRef.current();
   }, [tracks, bpm, beatsPerMeasure, metronome]);
 
   // 音素材パネルの ▶️（試聴）
@@ -1305,14 +1355,16 @@ const DAWPage = () => {
     if (deselectClip) setSelectedClipId(null);
   }, []);
 
-  // 新しい音素材をトラックに置く（direction: 'forward' なら、重なるとき後ろの空きへ）
+  // 新しい音素材をトラックに置く（direction: 'forward' なら、重なるとき後ろの空きへ）。
+  // timePosition は関数でもよい（音の長さを調べ終えてから位置を決める。＋ボタンの連打で同じ位置に重ならないように）
   const placeSoundOnTrack = useCallback(async (sound, trackId, timePosition, { direction = 'nearest', advancePlayhead = false } = {}) => {
     const width = await getClipWidth(sound);
     if (!isMountedRef.current) return null;
     const target = tracksRef.current.find((track) => sameId(track.id, trackId));
     if (!target) return null;
     const step = getSnapStep();
-    const startTime = findFreePosition(target.clips, Math.max(0, toPosition(timePosition)), width, { step, direction });
+    const position = typeof timePosition === 'function' ? timePosition() : timePosition;
+    const startTime = findFreePosition(target.clips, Math.max(0, toPosition(position)), width, { step, direction });
     const clip = {
       id: createClipId(), // より確実にユニークなIDを生成
       soundData: sound,
@@ -1321,9 +1373,13 @@ const DAWPage = () => {
       trackId: target.id
     };
     recordHistory();
-    setTracks((prev) => prev.map((track) => (
+    const addClip = (list) => list.map((track) => (
       sameId(track.id, trackId) ? { ...track, clips: [...track.clips, clip] } : track
-    )));
+    ));
+    // 画面が描き直される前に次の音を置いても（音の長さを調べ終えた＋ボタンが続けて動くとき）、
+    // この音を避けて置けるよう、すぐに反映しておく（以前は同じ位置に 2 つ重なり、元に戻すと 2 つとも消えた）
+    tracksRef.current = addClip(tracksRef.current);
+    setTracks(addClip);
     setSelectedClipId(clip.id);
     setSelectedTrackId(target.id);
     if (advancePlayhead && !isPlayingRef.current) {
@@ -1344,7 +1400,8 @@ const DAWPage = () => {
     const list = tracksRef.current;
     const track = list.find((item) => sameId(item.id, selectedTrackIdRef.current)) || list[0];
     if (!track) return;
-    const position = isPlayingRef.current ? getPlaybackPositionSeconds() * pixelsPerSecondRef.current : currentTimeRef.current;
+    // 位置は音の長さを調べ終えてから読む（続けて押したとき、前に置いた音の後ろに並ぶように）
+    const position = () => (isPlayingRef.current ? getPlaybackPositionSeconds() * pixelsPerSecondRef.current : currentTimeRef.current);
     placeSoundOnTrack(sound, track.id, position, { direction: 'forward', advancePlayhead: true }).catch((placeError) => {
       console.error('配置エラー:', placeError);
       setError('音素材の配置に失敗しました。再度お試しください。');
@@ -1353,16 +1410,17 @@ const DAWPage = () => {
   }, [placeSoundOnTrack]);
 
   // 配置済みのクリップを移動する（別のトラックへの移動も含む）
+  // 動いたら true（同じ位置のまま・置けないときは false）
   const moveClipToTrack = useCallback((clip, targetTrackId, rawStartTime, { direction = 'nearest' } = {}) => {
     const target = tracksRef.current.find((track) => sameId(track.id, targetTrackId));
-    if (!target) return;
+    if (!target) return false;
     const startTime = findFreePosition(target.clips, Math.max(0, toPosition(rawStartTime)), clip.duration, {
       excludeClipId: clip.id,
       step: getSnapStep(),
       direction
     });
     const current = findClip(clip.id);
-    if (current && sameId(current.track.id, target.id) && current.clip.startTime === startTime) return;
+    if (current && sameId(current.track.id, target.id) && current.clip.startTime === startTime) return false;
     recordHistory();
     const { originalTrackId, ...clipData } = clip;
     const moved = { ...clipData, startTime, trackId: target.id };
@@ -1373,6 +1431,7 @@ const DAWPage = () => {
     }));
     setSelectedClipId(clip.id);
     setSelectedTrackId(target.id);
+    return true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [getSnapStep, recordHistory]);
 
@@ -1402,6 +1461,11 @@ const DAWPage = () => {
     if (track.clips.length > 0 && !window.confirm('このトラックには音が置かれています。トラックごと削除しますか？')) {
       return;
     }
+    // 消したトラックの削除ボタンが無くなるので、となりのトラック（次、なければ前）のトラック名へフォーカスを移す
+    const index = tracksRef.current.indexOf(track);
+    const neighbor = tracksRef.current[index + 1] || tracksRef.current[index - 1] || null;
+    pendingFocusClipIdRef.current = null;
+    pendingFocusTrackIdRef.current = neighbor ? neighbor.id : null;
     recordHistory();
     setTracks((prevTracks) => (
       prevTracks.length > 1 ? prevTracks.filter((t) => t.id !== trackId) : prevTracks
@@ -1418,6 +1482,15 @@ const DAWPage = () => {
 
   const removeClip = useCallback((trackId, clipId) => {
     const found = findClip(clipId);
+    // 消した音のボタンが無くなり、フォーカスがページの先頭に戻っていた（キーボード・読み上げで使うとき）。
+    // となりの音（後ろ、なければ前）に、音が無ければトラック名のボタンに移す
+    if (found) {
+      const sorted = [...found.track.clips].sort((a, b) => a.startTime - b.startTime);
+      const index = sorted.findIndex((clip) => sameId(clip.id, clipId));
+      const neighbor = sorted[index + 1] || sorted[index - 1] || null;
+      pendingFocusClipIdRef.current = neighbor ? neighbor.id : null;
+      pendingFocusTrackIdRef.current = found.track.id;
+    }
     recordHistory();
     setTracks((prevTracks) => prevTracks.map((track) => (
       sameId(track.id, trackId)
@@ -1455,9 +1528,14 @@ const DAWPage = () => {
     const found = findClip(clipId);
     if (!found) return;
     const step = snapModeRef.current === 'off' ? pixelsPerSecondRef.current * 0.1 : getSnapStep();
-    const desired = Math.max(0, roundToStep(found.clip.startTime, step) + steps * step);
-    pendingFocusClipIdRef.current = clipId;
-    moveClipToTrack(found.clip, found.track.id, desired, { direction: steps > 0 ? 'forward' : 'nearest' });
+    // 拍の途中にある音は、→ で次の拍、← で前の拍へ（以前は四捨五入してから動かし、1 拍とばすことがあった）
+    const base = steps > 0 ? floorToStep(found.clip.startTime, step) : ceilToStep(found.clip.startTime, step);
+    const desired = Math.max(0, base + steps * step);
+    // 動いたときだけ、動いた音にフォーカスを戻す（動かなかったのに覚えておくと、あとの別の操作で
+    // フォーカスがこの音に飛んでいた）
+    if (moveClipToTrack(found.clip, found.track.id, desired, { direction: steps > 0 ? 'forward' : 'nearest' })) {
+      pendingFocusClipIdRef.current = clipId;
+    }
   };
 
   const moveClipToNeighborTrack = (clipId, offset) => {
@@ -1466,8 +1544,9 @@ const DAWPage = () => {
     const list = tracksRef.current;
     const index = list.indexOf(found.track) + offset;
     if (index < 0 || index >= list.length) return;
-    pendingFocusClipIdRef.current = clipId;
-    moveClipToTrack(found.clip, list[index].id, found.clip.startTime);
+    if (moveClipToTrack(found.clip, list[index].id, found.clip.startTime)) {
+      pendingFocusClipIdRef.current = clipId;
+    }
   };
 
   const handleClipKeyDown = (event, clip, trackId) => {
@@ -1512,10 +1591,18 @@ const DAWPage = () => {
   // 別のトラックに動かすと要素が作り直されるので、キーボードで動かしたあとはフォーカスを戻す
   useEffect(() => {
     const clipId = pendingFocusClipIdRef.current;
-    if (clipId === null || !timelineRef.current) return;
+    const trackId = pendingFocusTrackIdRef.current;
+    const root = timelineRef.current;
+    if ((clipId === null && trackId === null) || !root) return;
     pendingFocusClipIdRef.current = null;
-    const element = Array.from(timelineRef.current.querySelectorAll('.audio-clip'))
+    pendingFocusTrackIdRef.current = null;
+    let element = clipId === null ? null : Array.from(root.querySelectorAll('.audio-clip'))
       .find((item) => item.dataset.clipId === String(clipId));
+    if (!element && trackId !== null) {
+      const lane = Array.from(root.querySelectorAll('.track')).find((item) => item.dataset.trackId === String(trackId));
+      const row = lane && lane.closest('.track-row');
+      element = row ? row.querySelector('.track-select-btn') : null;
+    }
     if (element && document.activeElement !== element) element.focus();
   }, [tracks]);
 
@@ -1537,8 +1624,9 @@ const DAWPage = () => {
     const measure = beat * beatsPerMeasureRef.current;
     const current = isPlayingRef.current ? getPlaybackPositionSeconds() * pixelsPerSecondRef.current : currentTimeRef.current;
     let next = null;
-    if (event.key === 'ArrowRight' || event.key === 'ArrowUp') next = roundToStep(current, beat) + beat;
-    if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') next = roundToStep(current, beat) - beat;
+    // 拍の途中で止めたときも、→ で次の拍、← で前の拍へ（以前は四捨五入してから動かし、1 拍とばすことがあった）
+    if (event.key === 'ArrowRight' || event.key === 'ArrowUp') next = floorToStep(current, beat) + beat;
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') next = ceilToStep(current, beat) - beat;
     // 1 小節分だけ動かす（動かした先は拍の頭にそろう）
     if (event.key === 'PageDown') next = current + measure;
     if (event.key === 'PageUp') next = current - measure;
@@ -1604,6 +1692,7 @@ const DAWPage = () => {
     // クリップは秒ではなくピクセルで位置を持っているので、同じ比率で伸縮させる
     const rescaled = rescaleTracks(tracksRef.current, current, next);
     tracksRef.current = rescaled;
+    zoomedTracksRef.current = rescaled;
     setTracks(rescaled);
     if (!isPlayingRef.current) {
       const position = convertUnits(currentTimeRef.current, current, next);
@@ -1643,7 +1732,9 @@ const DAWPage = () => {
       }
       // スペースキーで再生・一時停止（ボタンなどにフォーカスがあるときは、そのボタンを押す動作を優先）
       if (key === ' ' && !withModifier) {
-        const interactive = target && target.closest && target.closest('button, a, [role="button"], [role="slider"], summary');
+        // ボタンなどではスペースキーでそのボタンが押される。上の目盛り（スライダー）ではスペースキーに
+        // 役目が無いので、再生・一時停止に使う（以前は目盛りを押したあと、スペースキーが効かなかった）
+        const interactive = target && target.closest && target.closest('button, a, [role="button"], summary');
         if (!interactive) {
           event.preventDefault();
           togglePlaybackRef.current();
@@ -2055,11 +2146,18 @@ const DAWPage = () => {
     const clips = tracks.filter((track) => !track.muted).flatMap((track) => track.clips)
       .filter((clip) => isPlayableSound(clip.soundData));
     if (clips.length === 0) {
-      setError('出力する音声がありません。音素材を配置してください。');
+      const placedCount = tracks.reduce((count, track) => count + track.clips.length, 0);
+      setError(placedCount > 0
+        ? '全部のトラックがミュートになっています。書き出す音のトラックのミュートを外してください。'
+        : '出力する音声がありません。音素材を配置してください。');
       return;
     }
 
     setIsExporting(true);
+    // 長い曲では音を重ねる処理に時間がかかり、その間は画面が止まる。先にお知らせを出してから始める
+    // （「ファイル」メニューはすぐ閉じるので、メニューの「書き出し中...」は見えなかった）
+    notify('音楽を WAV ファイルに書き出しています...');
+    await new Promise((resolve) => setTimeout(resolve, 50));
     try {
       const pps = pixelsPerSecond;
       const sampleRate = ctx.sampleRate;
@@ -2337,7 +2435,14 @@ const DAWPage = () => {
               <button
                 type="button"
                 className="button-ghost daw-toolbar-button"
-                onClick={() => setSelectedClipId(null)}
+                onClick={() => {
+                  // このボタンは消えるので、選んでいた音にフォーカスを戻す
+                  const clipId = selected.clip.id;
+                  setSelectedClipId(null);
+                  const element = timelineRef.current && Array.from(timelineRef.current.querySelectorAll('.audio-clip'))
+                    .find((item) => item.dataset.clipId === String(clipId));
+                  if (element) element.focus();
+                }}
                 aria-label="選ぶのをやめる"
               >
                 <Icon icon={X} />

@@ -221,6 +221,11 @@
 /* 読み込み中 */
 .loading-overlay {
   position: fixed;
+  /* iPadOS 14.4 以前は inset が使えないので、上下左右も書く */
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   inset: 0;
   z-index: 1000;
   display: flex;

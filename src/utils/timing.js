@@ -64,10 +64,13 @@ export const ceilToStep = (position, step) => (step > 0 ? Math.ceil(position / s
 // 前の目盛り（ちょうど目盛りの上ならそのまま）
 export const floorToStep = (position, step) => (step > 0 ? Math.floor(position / step + EPSILON) * step : position);
 
+// 拍の頭とみなす余裕（拍の 1 万分の 1。以前に保存された、少しだけずれた位置の音も拍の上として数える）
+const BEAT_LABEL_TOLERANCE = 1e-4;
+
 // 位置（ピクセル）を「何小節目の何拍目」で表す（どちらも 1 から数える）
 export const describePosition = (position, { bpm, beatsPerMeasure, pixelsPerSecond }) => {
   const beats = Math.max(0, position) / beatWidthPx(bpm, pixelsPerSecond);
-  const beatIndex = Math.floor(beats + EPSILON);
+  const beatIndex = Math.floor(beats + BEAT_LABEL_TOLERANCE);
   const perMeasure = normalizeBeatsPerMeasure(beatsPerMeasure);
   return {
     measure: Math.floor(beatIndex / perMeasure) + 1,
@@ -103,12 +106,14 @@ export const getTimelineMeasureCount = ({ contentEndPx = 0, bpm, beatsPerMeasure
   return Math.max(MIN_TIMELINE_MEASURES, usedMeasures + EXTRA_TIMELINE_MEASURES);
 };
 
-// 位置を「何拍目か」「何秒目か」に直して小数第 6 位で丸め、新しい幅で掛け直す。
+// 位置を「何拍目か」「何秒目か」に直して小数第 9 位で丸め、新しい幅で掛け直す。
 // 比率を掛け続けると誤差がたまり（200px が 199.999998px になる など）、
 // 拍の頭にあった音が拍からずれたり、ぴったり隣り合った音が重なりと判定されたりする。
 // 丸めた値をもとに戻すので、何度変えても同じ拍・同じ秒の上に戻る。
+// （以前は小数第 6 位で、テンポ 130 でズームすると拍の頭の音が「1 拍前」と表示されることがあった）
+const CONVERT_PRECISION = 1e9;
 export const convertUnits = (value, fromUnitPx, toUnitPx) => (
-  (Math.round((value / fromUnitPx) * 1e6) / 1e6) * toUnitPx
+  (Math.round((value / fromUnitPx) * CONVERT_PRECISION) / CONVERT_PRECISION) * toUnitPx
 );
 
 // テンポを変えたとき、置いた音が同じ拍の上に残るよう開始位置を動かす（音の長さは変えない）

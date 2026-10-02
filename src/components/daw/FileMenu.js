@@ -63,8 +63,11 @@ const FileMenu = ({ items }) => {
                   aria-label={item.label}
                   aria-describedby={item.description ? `${item.id}-description` : undefined}
                   onClick={() => {
-                    // ファイルを選ぶ画面などは、タップの処理の中で開かないと iPad で開かない
+                    // メニューを閉じると押した項目が消えるので、「ファイル」ボタンにフォーカスを戻してから実行する
+                    // （実行した操作がダイアログなどを開けば、そちらにフォーカスが移る）
+                    if (buttonRef.current) buttonRef.current.focus();
                     setOpen(false);
+                    // ファイルを選ぶ画面などは、タップの処理の中で開かないと iPad で開かない
                     item.onSelect();
                   }}
                 >

@@ -683,7 +683,9 @@ describe('保存・読み込み・出力', () => {
     await renderDAW();
     fireEvent.click(screen.getByRole('button', { name: 'トラック 1をミュート' }));
     chooseFileMenuItem('WAV ファイルに書き出す');
-    expect(screen.getByText(/出力する音声がありません/)).toBeInTheDocument();
+    // 音はあるので「音素材を配置してください」ではなく、ミュートになっていると伝える
+    expect(screen.getByRole('alert')).toHaveTextContent('全部のトラックがミュートになっています');
+    expect(screen.queryByText(/出力する音声がありません/)).not.toBeInTheDocument();
   });
 
   test('音が無いときの音源出力は案内を表示する', async () => {

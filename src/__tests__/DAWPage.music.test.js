@@ -450,3 +450,153 @@ describe('表示', () => {
     expect(screen.getByRole('button', { name: '音素材を表示' })).toHaveAttribute('aria-expanded', 'false');
   });
 });
+
+describe('レビューで見つかった不具合（再生・＋ボタン・キーボード・フォーカス）', () => {
+  test('音の長さを調べている間に＋を 2 回押しても、同じ位置に重ねず順に並べる（元に戻すと 1 つずつ戻る）', async () => {
+    await seedLibrary();
+    // 音の長さを調べ終わるのを遅らせる（初めて使う音を続けて押したとき）
+    let releaseDecode;
+    const gate = new Promise((resolve) => { releaseDecode = resolve; });
+    const decode = audioContext.decodeAudioData.getMockImplementation();
+    audioContext.decodeAudioData.mockImplementation((buffer, ok, ng) => gate.then(() => decode(buffer, ok, ng)));
+    const { container } = await renderDAW();
+    const place = await within(container.querySelector('.sound-panel')).findByRole('button', { name: 'たいこをトラック 1に置く' });
+    fireEvent.click(place);
+    fireEvent.click(place);
+    await act(async () => {
+      releaseDecode();
+    });
+    await waitFor(() => expect(clipLefts(container)).toHaveLength(2));
+    expect(clipLefts(container)).toEqual(['0px', '100px']);
+    fireEvent.click(screen.getByRole('button', { name: '元に戻す' }));
+    expect(clipLefts(container)).toEqual(['0px']);
+  });
+
+  test('再生中に、この先に鳴る音が無くなる編集をしたら、曲の最初に戻らずにその場で止まる', async () => {
+    await seedProject([drumClip(1, 0)], { secondTrackClips: [bellClip(2, 0, 102)] }); // たいこ 0〜1 秒、すず 0〜2 秒
+    const { container } = await renderDAW();
+    fireEvent.click(screen.getByRole('slider', { name: /再生位置/ }), { clientX: 150 }); // 1.5 秒（たいこは終わっている）
+    fireEvent.click(screen.getByRole('button', { name: '再生' }));
+    await waitFor(() => expect(audioContext.started.length).toBe(2)); // 無音 + すず
+    // すずのトラックをミュートすると、この先に鳴らす音が無い（以前は曲の最初から鳴り直した）
+    fireEvent.click(screen.getByRole('button', { name: 'トラック 2をミュート' }));
+    expect(await screen.findByRole('button', { name: '再生' })).toBeInTheDocument();
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(audioContext.started.length).toBe(2);
+    expect(container.querySelector('.playhead').style.left).toBe('150px');
+  });
+
+  test('再生中にズームしても、鳴っている音を止めて予約し直さない（音が途切れない）', async () => {
+    await seedProject([bellClip(1, 0)]);
+    await renderDAW();
+    fireEvent.click(screen.getByRole('button', { name: '再生' }));
+    await waitFor(() => expect(audioContext.started.length).toBe(2));
+    const source = audioContext.started[1].source;
+    fireEvent.click(screen.getByRole('button', { name: 'ズームイン（拡大）' }));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(source.stop).not.toHaveBeenCalled();
+    expect(audioContext.started.length).toBe(2);
+    // テンポを変えたときは、鳴る位置が変わるので予約し直す
+    fireEvent.click(screen.getByRole('button', { name: 'テンポを速くする' }));
+    await waitFor(() => expect(source.stop).toHaveBeenCalled());
+  });
+
+  test('全部のトラックをミュートして再生を押すと、音が無いのではなくミュートだと知らせる', async () => {
+    await seedProject([drumClip(1, 0)]);
+    await renderDAW();
+    fireEvent.click(screen.getByRole('button', { name: 'トラック 1をミュート' }));
+    fireEvent.click(screen.getByRole('button', { name: '再生' }));
+    expect(await screen.findByText('再生できる音がありません（ミュートしていないトラックに音を置きましょう）。')).toBeInTheDocument();
+    expect(screen.queryByText(/まだ音が置かれていません/)).not.toBeInTheDocument();
+  });
+
+  test('拍の途中で止めたときも、目盛りの → で次の拍、← で前の拍へ動く（1 拍とばさない）', async () => {
+    await renderDAW();
+    fireEvent.change(screen.getByRole('combobox', { name: /置き方/ }), { target: { value: 'off' } });
+    const ruler = screen.getByRole('slider', { name: /再生位置/ });
+    fireEvent.click(ruler, { clientX: 80 }); // 1.6 拍
+    expect(document.querySelector('.playhead').style.left).toBe('80px');
+    fireEvent.keyDown(ruler, { key: 'ArrowRight' });
+    expect(document.querySelector('.playhead').style.left).toBe('100px'); // 以前は 150px（2 拍目をとばした）
+    fireEvent.click(ruler, { clientX: 80 });
+    fireEvent.keyDown(ruler, { key: 'ArrowLeft' });
+    expect(document.querySelector('.playhead').style.left).toBe('50px');
+  });
+
+  test('上の目盛りを押したあとも、スペースキーで再生できる', async () => {
+    await seedProject([drumClip(1, 0)]);
+    await renderDAW();
+    const ruler = screen.getByRole('slider', { name: /再生位置/ });
+    ruler.focus();
+    fireEvent.keyDown(ruler, { key: ' ' });
+    expect(screen.getByRole('button', { name: '一時停止' })).toBeInTheDocument();
+  });
+
+  test('テンポを元に戻すと、再生位置も同じ拍の上に戻る', async () => {
+    await renderDAW();
+    const ruler = screen.getByRole('slider', { name: /再生位置/ });
+    for (let i = 0; i < 3; i++) fireEvent.keyDown(ruler, { key: 'ArrowRight' });
+    expect(ruler).toHaveAttribute('aria-valuetext', '1小節 4拍');
+    for (let i = 0; i < 12; i++) fireEvent.click(screen.getByRole('button', { name: 'テンポを遅くする' })); // 120 → 60
+    expect(ruler).toHaveAttribute('aria-valuetext', '1小節 4拍');
+    fireEvent.click(screen.getByRole('button', { name: '元に戻す' }));
+    expect(screen.getByText('120')).toBeInTheDocument();
+    // 以前は 60 のときのピクセル位置のまま残り、「2小節 3拍」になっていた
+    expect(ruler).toHaveAttribute('aria-valuetext', '1小節 4拍');
+  });
+
+  test('Delete キーで消したあとは、となりの音に、音が無ければトラック名のボタンにフォーカスが移る', async () => {
+    await seedProject([drumClip(1, 0), drumClip(2, 200)]);
+    const { container } = await renderDAW();
+    const first = clipElements(container)[0];
+    first.focus();
+    fireEvent.keyDown(first, { key: 'Delete' });
+    await waitFor(() => expect(clipElements(container)).toHaveLength(1));
+    await waitFor(() => expect(clipElements(container)[0]).toHaveFocus());
+    fireEvent.keyDown(clipElements(container)[0], { key: 'Delete' });
+    await waitFor(() => expect(clipElements(container)).toHaveLength(0));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'トラック 1' })).toHaveFocus());
+  });
+
+  test('選んだ音の「削除」「選ぶのをやめる」を押したあとも、フォーカスがページの先頭に飛ばない', async () => {
+    await seedProject([drumClip(1, 0), drumClip(2, 200)]);
+    const { container } = await renderDAW();
+    fireEvent.click(clipElements(container)[0]);
+    fireEvent.click(screen.getByRole('button', { name: '選ぶのをやめる' }));
+    expect(clipElements(container)[0]).toHaveFocus();
+    fireEvent.click(clipElements(container)[0]);
+    fireEvent.click(screen.getByRole('button', { name: 'たいこを削除' }));
+    await waitFor(() => expect(clipElements(container)).toHaveLength(1));
+    await waitFor(() => expect(clipElements(container)[0]).toHaveFocus());
+  });
+
+  test('トラックを削除したら、となりのトラックのボタンにフォーカスが移る', async () => {
+    await seedProject([drumClip(1, 0)]);
+    const { container } = await renderDAW();
+    expect(trackElements(container)).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button', { name: 'トラック 1を削除' }));
+    await waitFor(() => expect(trackElements(container)).toHaveLength(1));
+    await waitFor(() => expect(document.activeElement).toHaveClass('track-select-btn'));
+  });
+
+  test('「ファイル」の項目を選んだら、「ファイル」ボタンにフォーカスを戻す', async () => {
+    await renderDAW();
+    window.confirm = jest.fn(() => false);
+    fireEvent.click(screen.getByRole('button', { name: 'ファイル' }));
+    fireEvent.click(screen.getByRole('button', { name: '新しく作る（リセット）' }));
+    expect(screen.getByRole('button', { name: 'ファイル' })).toHaveFocus();
+  });
+
+  test('← で動かせなかった音に、あとで別の操作をしたときフォーカスが飛ばない', async () => {
+    await seedProject([drumClip(1, 0)]);
+    const { container } = await renderDAW();
+    const clip = clipElements(container)[0];
+    clip.focus();
+    fireEvent.keyDown(clip, { key: 'ArrowLeft' }); // 0 より前には動かない
+    const tempoUp = screen.getByRole('button', { name: 'テンポを速くする' });
+    tempoUp.focus();
+    fireEvent.click(tempoUp);
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(tempoUp).toHaveFocus();
+  });
+});

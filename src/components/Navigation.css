@@ -73,19 +73,6 @@
   outline-offset: 2px;
 }
 
-/* スクリーンリーダー専用テキスト */
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
-
 /* 縦向きの iPad など: タイトルは記号だけにして、ページの切り替えを 1 行に収める */
 @media (max-width: 900px) {
   .nav-title-text {

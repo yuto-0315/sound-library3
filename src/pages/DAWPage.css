@@ -578,12 +578,13 @@
   touch-action: none;
 }
 
-.sound-info {
+/* 音素材の一覧の中だけに効かせる（以前は音あつめ・音ライブラリのカードにも効き、長い名前が「…」で切れていた） */
+.sound-panel .sound-info {
   flex: 1;
   min-width: 0;
 }
 
-.sound-info .sound-name {
+.sound-panel .sound-info .sound-name {
   margin: 0 0 2px;
   overflow: hidden;
   font-size: 15px;
@@ -592,7 +593,7 @@
   text-overflow: ellipsis;
 }
 
-.sound-meta {
+.sound-panel .sound-meta {
   display: flex;
   flex-wrap: nowrap;
   gap: 4px;
@@ -622,7 +623,7 @@
   color: var(--color-primary-soft-text);
 }
 
-.sound-actions {
+.sound-panel .sound-actions {
   flex-shrink: 0;
   display: flex;
   gap: 4px;
@@ -651,18 +652,18 @@
   font-size: 18px;
 }
 
-.no-sounds {
+.sound-panel .no-sounds {
   padding: 18px 14px;
   color: var(--color-text-muted);
   font-size: 14px;
   text-align: center;
 }
 
-.no-sounds p {
+.sound-panel .no-sounds p {
   margin: 4px 0;
 }
 
-.no-sounds a {
+.sound-panel .no-sounds a {
   color: var(--color-primary);
   font-weight: 700;
 }

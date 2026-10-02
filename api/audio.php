@@ -8,6 +8,7 @@ require_once 'config.php';
 require_once 'audio_utils.php';
 require_once 'admin_auth.php';
 require_once 'validation.php';
+require_once 'room_access.php';
 
 setCORSHeaders();
 allowAdminPinHeader();
@@ -49,10 +50,8 @@ function handleGetAudio($pdo) {
     $searchTag = $_GET['tag'] ?? null;
     $searchName = $_GET['name'] ?? null;
 
-    if (!$roomId) {
-        sendError('部屋IDは必須です');
-        return;
-    }
+    // 部屋番号も合っているときだけ一覧を返す（部屋の ID は順番なので、ID だけだとどの部屋も見られた）
+    requireRoomAccess($pdo, $roomId, $_GET['room_number'] ?? null);
 
     $sql = "SELECT af.*, r.room_number, r.room_name
             FROM audio_files af
@@ -113,10 +112,8 @@ function handleUploadAudio($pdo) {
         return;
     }
 
-    if (!$roomId || !is_numeric($roomId)) {
-        sendError('部屋IDは必須です');
-        return;
-    }
+    // 部屋番号も合っているときだけ受け付ける（部屋の存在確認もここで行う）
+    requireRoomAccess($pdo, $roomId, $_POST['room_number'] ?? null);
 
     if ($studentName === false || $fileName === false) {
         sendError('名前が長すぎます（255文字まで）');
@@ -124,14 +121,6 @@ function handleUploadAudio($pdo) {
     }
     if ($fileName === null) {
         $fileName = $originalFileName !== '' ? $originalFileName : '音声';
-    }
-
-    // 部屋の存在確認
-    $roomStmt = $pdo->prepare("SELECT id FROM rooms WHERE id = ?");
-    $roomStmt->execute([$roomId]);
-    if (!$roomStmt->fetch()) {
-        sendError('指定された部屋が見つかりません', 404);
-        return;
     }
 
     // ファイルサイズチェック

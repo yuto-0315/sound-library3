@@ -63,8 +63,6 @@ CREATE TABLE IF NOT EXISTS download_history (
   FOREIGN KEY (audio_uid) REFERENCES audio_files(uid) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 初期データの挿入（テスト用。すでにある部屋番号は飛ばす）
-INSERT IGNORE INTO rooms (room_number, room_name, teacher_name) VALUES
-(101, '1年1組', '田中先生'),
-(102, '1年2組', '佐藤先生'),
-(201, '2年1組', '鈴木先生');
+-- 試しに使う部屋は database/sample_data.sql にある（手元で試すときだけ実行する）。
+-- 以前はここで入れていたため、本番でこのファイルを実行し直すと、削除した試しの部屋がよみがえり、
+-- その部屋番号をクラスで使えなくなっていた。

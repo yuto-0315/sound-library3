@@ -2,6 +2,8 @@ import React, { useRef } from 'react';
 import { LoaderCircle, Send, X } from 'lucide-react';
 import Icon from '../Icon';
 import Modal from '../Modal';
+import { focusNextFieldOnEnter } from '../../utils/keyboard';
+import { normalizeRoomNumberInput } from '../../utils/text';
 
 // 「先生に送る」（楽曲をサーバーに保存して、先生用ページで開けるようにする）
 const CloudSaveDialog = ({ values, onChange, onSubmit, onClose, isSaving, error }) => {
@@ -39,6 +41,7 @@ const CloudSaveDialog = ({ values, onChange, onSubmit, onClose, isSaving, error 
             maxLength={100}
             value={values.songTitle}
             onChange={update('songTitle')}
+            onKeyDown={focusNextFieldOnEnter}
             placeholder="例: あめのおと"
             enterKeyHint="next"
             required
@@ -55,7 +58,9 @@ const CloudSaveDialog = ({ values, onChange, onSubmit, onClose, isSaving, error 
             pattern="[0-9]*"
             maxLength={6}
             value={values.roomNumber}
-            onChange={(event) => onChange({ ...values, roomNumber: event.target.value.replace(/[^0-9]/g, '') })}
+            onChange={(event) => onChange({ ...values, roomNumber: normalizeRoomNumberInput(event.target.value) })}
+            onKeyDown={focusNextFieldOnEnter}
+            enterKeyHint="next"
             placeholder="先生に教えてもらった番号（例: 101）"
             required
           />
@@ -71,6 +76,8 @@ const CloudSaveDialog = ({ values, onChange, onSubmit, onClose, isSaving, error 
               maxLength={50}
               value={values.studentName}
               onChange={update('studentName')}
+              onKeyDown={focusNextFieldOnEnter}
+              enterKeyHint="next"
               placeholder="（なくてもよい）"
             />
           </div>
@@ -84,6 +91,8 @@ const CloudSaveDialog = ({ values, onChange, onSubmit, onClose, isSaving, error 
               maxLength={20}
               value={values.groupNumber}
               onChange={update('groupNumber')}
+              onKeyDown={focusNextFieldOnEnter}
+              enterKeyHint="done"
               placeholder="（なくてもよい）"
             />
           </div>

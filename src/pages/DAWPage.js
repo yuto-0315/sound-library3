@@ -82,6 +82,7 @@ import {
   snapStepPx
 } from '../utils/timing';
 import { API_BASE_URL, fetchJson, findRoomByNumber, getSavedStudentProfile, saveStudentProfile } from '../utils/api';
+import { normalizeRoomNumberInput } from '../utils/text';
 import {
   clearTrackHighlights,
   findTrackAtPoint,
@@ -1974,7 +1975,8 @@ const DAWPage = () => {
       setError('曲のタイトルを入力してください');
       return;
     }
-    if (!String(cloudSaveData.roomNumber).trim()) {
+    const roomNumber = normalizeRoomNumberInput(cloudSaveData.roomNumber);
+    if (!roomNumber) {
       setError('部屋番号を入力してください');
       return;
     }
@@ -1982,16 +1984,16 @@ const DAWPage = () => {
     setIsCloudSaving(true);
     setError(null);
     try {
-      // 部屋IDを取得
-      const roomsData = await fetchJson(`${API_BASE_URL}/rooms.php`);
+      // 部屋番号で部屋を探す（以前は部屋の一覧を丸ごと読み込んでいた。一覧は先生だけが見られる）
+      const roomsData = await fetchJson(`${API_BASE_URL}/rooms.php?${new URLSearchParams({ room_number: roomNumber })}`);
       if (!roomsData.success) {
-        setError('部屋情報の取得に失敗しました');
+        setError(roomsData.error || '部屋情報の取得に失敗しました');
         return;
       }
 
-      const targetRoom = findRoomByNumber(roomsData.data, cloudSaveData.roomNumber);
+      const targetRoom = findRoomByNumber(roomsData.data, roomNumber);
       if (!targetRoom) {
-        setError('指定された部屋番号が見つかりません');
+        setError(`部屋 ${roomNumber} が見つかりません。先生に部屋番号を確かめてください。`);
         return;
       }
 
@@ -2006,6 +2008,8 @@ const DAWPage = () => {
         },
         body: JSON.stringify({
           room_id: targetRoom.id,
+          // サーバーは部屋の ID と部屋番号の両方を確かめる
+          room_number: roomNumber,
           student_name: cloudSaveData.studentName.trim(),
           group_number: cloudSaveData.groupNumber.trim(),
           song_title: cloudSaveData.songTitle.trim(),
@@ -2015,7 +2019,7 @@ const DAWPage = () => {
 
       if (result.success) {
         try {
-          localStorage.setItem('sound-library-room', String(cloudSaveData.roomNumber).trim());
+          localStorage.setItem('sound-library-room', roomNumber);
         } catch (storageError) {
           // 無視
         }

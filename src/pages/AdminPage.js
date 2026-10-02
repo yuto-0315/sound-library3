@@ -4,15 +4,22 @@ import './AdminPage.css';
 import Icon from '../components/Icon';
 import { saveSongData } from '../utils/indexedDB';
 import { API_BASE_URL, fetchJson } from '../utils/api';
-import { toTagList, toText } from '../utils/text';
+import { normalizeRoomNumberInput, toHalfWidth, toTagList, toText } from '../utils/text';
 import { formatDateJa } from '../utils/date';
 
 // 先生用の暗証番号（サーバーで設定しているときだけ必要。タブを閉じると忘れる）
 const ADMIN_PIN_KEY = 'sound-library-admin-pin';
 
+// 暗証番号は半角の英数字・記号だけ。ブラウザは日本語や全角の文字を HTTP ヘッダーで送れず、
+// 以前は「さくら」などを入力すると、部屋の一覧も含めてすべての読み込みが失敗していた
+const SENDABLE_PIN = /^[\x21-\x7E]+$/;
+const normalizePin = (value) => toHalfWidth(value).trim();
+const isSendablePin = (value) => SENDABLE_PIN.test(value);
+
 const readStoredPin = () => {
   try {
-    return sessionStorage.getItem(ADMIN_PIN_KEY) || '';
+    const stored = sessionStorage.getItem(ADMIN_PIN_KEY) || '';
+    return isSendablePin(stored) ? stored : '';
   } catch (error) {
     return '';
   }
@@ -62,6 +69,11 @@ const AdminPage = () => {
   const [selectedRoom, setSelectedRoom] = useState(null);
   const [audioFiles, setAudioFiles] = useState([]);
   const [songs, setSongs] = useState([]);
+  // 読み込めなかったときは「まだありません」ではなく、読み込めなかったと出す
+  const [songsFailed, setSongsFailed] = useState(false);
+  const [audioFailed, setAudioFailed] = useState(false);
+  // サーバーの暗証番号の設定: 'off' | 'on' | 'invalid' | null（分からない・古いサーバー）
+  const [pinStatus, setPinStatus] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
@@ -82,7 +94,7 @@ const AdminPage = () => {
   // 暗証番号はサーバーで設定しているときだけ確認される（設定していなければ送っても無視される）
   const request = useCallback((path, options = {}) => {
     const headers = { ...(options.headers || {}) };
-    if (pinRef.current) headers['X-Admin-Pin'] = pinRef.current;
+    if (pinRef.current && isSendablePin(pinRef.current)) headers['X-Admin-Pin'] = pinRef.current;
     return fetchJson(`${API_BASE_URL}/${path}`, { ...options, headers });
   }, []);
 
@@ -102,6 +114,9 @@ const AdminPage = () => {
       const data = await request('rooms.php');
       if (data.success) {
         setRooms(Array.isArray(data.data) ? data.data : []);
+      } else if (data.error && !pinRef.current) {
+        // 部屋の一覧は暗証番号が必要（サーバーで設定しているとき）
+        setError(`${data.error}。右上の「先生用の暗証番号」に入力してください。`);
       } else {
         setError(data.error || '部屋一覧の読み込みに失敗しました');
       }
@@ -113,15 +128,37 @@ const AdminPage = () => {
     }
   }, [request]);
 
+  // 暗証番号を入れ直したら、部屋の一覧も読み込み直す
   useEffect(() => {
     loadRooms();
-  }, [loadRooms]);
+  }, [loadRooms, pin]);
+
+  // 暗証番号が設定されていなければ、先生に知らせる（誰でも部屋を削除できる状態のため）
+  useEffect(() => {
+    let cancelled = false;
+    fetchJson(`${API_BASE_URL}/admin_status.php`)
+      .then((data) => {
+        if (!cancelled && data && data.success && data.data) setPinStatus(data.data.pin || null);
+      })
+      .catch(() => {
+        // 古いサーバーには無い。表示しないだけ
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const savePin = (event) => {
     event.preventDefault();
-    const value = pinInput.trim();
+    const value = normalizePin(pinInput);
+    if (value && !isSendablePin(value)) {
+      setMessage('');
+      setError('暗証番号は半角の英数字・記号で入力してください（日本語や空白は使えません）。');
+      return;
+    }
     storePin(value);
     setPin(value);
+    setPinInput(value);
     setError('');
     setMessage(value ? '暗証番号を入力しました。' : '暗証番号を消しました。');
   };
@@ -182,10 +219,11 @@ const AdminPage = () => {
   };
 
   // 部屋を開く（生徒の楽曲と共有された音を読み込む）
-  const selectRoom = async (room) => {
+  // keepTab: 「読み込み直す」のときは、見ていたタブのままにする
+  const selectRoom = async (room, { keepTab = false } = {}) => {
     begin();
     setSelectedRoom(room);
-    setActiveTab('songs');
+    if (!keepTab) setActiveTab('songs');
     setIsLoading(true);
     const problems = [];
 
@@ -195,27 +233,35 @@ const AdminPage = () => {
       const songsData = await request(`songs.php?room_id=${encodeURIComponent(room.id)}`);
       if (songsData.success) {
         setSongs((songsData.data || []).map(normalizeSong));
+        setSongsFailed(false);
       } else {
         setSongs([]);
+        setSongsFailed(true);
         problems.push(`生徒の楽曲を読み込めませんでした（${songsData.error || '原因不明'}）`);
       }
     } catch (err) {
       console.error('Load songs error:', err);
       setSongs([]);
+      setSongsFailed(true);
       problems.push(`生徒の楽曲を読み込めませんでした（${err.message}）`);
     }
 
     try {
-      const audioData = await request(`audio.php?room_id=${encodeURIComponent(room.id)}`);
+      // サーバーは部屋の ID と部屋番号の両方を確かめる
+      const params = new URLSearchParams({ room_id: room.id, room_number: room.room_number });
+      const audioData = await request(`audio.php?${params}`);
       if (audioData.success) {
         setAudioFiles((audioData.data || []).map(normalizeAudioFile));
+        setAudioFailed(false);
       } else {
         setAudioFiles([]);
+        setAudioFailed(true);
         problems.push(`共有された音を読み込めませんでした（${audioData.error || '原因不明'}）`);
       }
     } catch (err) {
       console.error('Load audio error:', err);
       setAudioFiles([]);
+      setAudioFailed(true);
       problems.push(`共有された音を読み込めませんでした（${err.message}）`);
     }
 
@@ -326,7 +372,8 @@ const AdminPage = () => {
     if (tabRefs.current[next.id]) tabRefs.current[next.id].focus();
   };
 
-  const tabCounts = { songs: songs.length, audio: audioFiles.length };
+  // 読み込めなかったときは数を出さない（「(0)」だと、送られた楽曲が無いように見える）
+  const tabCounts = { songs: songsFailed ? null : songs.length, audio: audioFailed ? null : audioFiles.length };
 
   return (
     <div className="admin-page page-container">
@@ -357,6 +404,21 @@ const AdminPage = () => {
         </form>
       </header>
 
+      {pinStatus === 'off' && (
+        <p className="notice notice-warning admin-pin-status">
+          <Icon icon={TriangleAlert} />
+          <span>
+            暗証番号が設定されていません。このページの URL を知っている人は、だれでも部屋や音・楽曲を削除できます。
+            設定のしかたは SETUP.md の「先生用ページの暗証番号」を見てください。
+          </span>
+        </p>
+      )}
+      {pinStatus === 'invalid' && (
+        <div className="error-message" role="alert">
+          サーバーの暗証番号の設定が正しくありません。半角の英数字・記号で 6 文字以上にしてください（SETUP.md）。
+        </div>
+      )}
+
       {error && (
         <div className="error-message" role="alert">{error}</div>
       )}
@@ -370,7 +432,7 @@ const AdminPage = () => {
         <div className="admin-selected-room">
           <Icon icon={DoorOpen} />
           <span>開いている部屋: <strong>部屋 {selectedRoom.room_number}</strong> {selectedRoom.room_name}</span>
-          <button type="button" className="button-ghost" onClick={() => selectRoom(selectedRoom)}>
+          <button type="button" className="button-ghost" onClick={() => selectRoom(selectedRoom, { keepTab: true })}>
             <Icon icon={RefreshCw} /> 読み込み直す
           </button>
         </div>
@@ -392,7 +454,7 @@ const AdminPage = () => {
             onKeyDown={(event) => handleTabKeyDown(event, index)}
           >
             <Icon icon={tab.icon} /> {tab.label}
-            {tab.needsRoom && <span className="admin-tab-count">({tabCounts[tab.id]})</span>}
+            {tab.needsRoom && tabCounts[tab.id] !== null && <span className="admin-tab-count">({tabCounts[tab.id]})</span>}
           </button>
         ))}
       </div>
@@ -413,10 +475,14 @@ const AdminPage = () => {
                     pattern="[0-9]*"
                     maxLength={6}
                     value={newRoom.room_number}
-                    onChange={(e) => setNewRoom((prev) => ({ ...prev, room_number: e.target.value.replace(/[^0-9]/g, '') }))}
+                    onChange={(e) => setNewRoom((prev) => ({ ...prev, room_number: normalizeRoomNumberInput(e.target.value) }))}
                     placeholder="例: 101"
+                    aria-describedby="room-number-help"
                     required
                   />
+                  <p id="room-number-help" className="field-help">
+                    生徒が部屋に入るときの番号です。クラスの外の人に推測されにくい番号（例: 6 けた）がおすすめです。
+                  </p>
                 </div>
 
                 <div className="form-group">
@@ -494,7 +560,9 @@ const AdminPage = () => {
 
       {activeTab === 'songs' && selectedRoom && (
         <section className="admin-panel songs-section" role="tabpanel" id="admin-panel-songs" aria-labelledby="admin-tab-songs">
-          {songs.length === 0 ? (
+          {songsFailed ? (
+            <p className="empty-state">生徒の楽曲を読み込めませんでした。上の「読み込み直す」を押してください。</p>
+          ) : songs.length === 0 ? (
             <p className="empty-state">この部屋に送られた楽曲はまだありません</p>
           ) : (
             <ul className="admin-list songs-list">
@@ -536,7 +604,9 @@ const AdminPage = () => {
 
       {activeTab === 'audio' && selectedRoom && (
         <section className="admin-panel audio-section" role="tabpanel" id="admin-panel-audio" aria-labelledby="admin-tab-audio">
-          {audioFiles.length === 0 ? (
+          {audioFailed ? (
+            <p className="empty-state">共有された音を読み込めませんでした。上の「読み込み直す」を押してください。</p>
+          ) : audioFiles.length === 0 ? (
             <p className="empty-state">この部屋に共有された音はまだありません</p>
           ) : (
             <ul className="admin-list audio-list">

@@ -31,8 +31,14 @@ beforeEach(() => {
   installFakeIndexedDB();
   installMemoryLocalStorage();
   sessionStorage.clear();
-  responses = { rooms: () => json(ROOMS), audio: () => json(AUDIO), songs: () => json(SONGS) };
+  responses = {
+    rooms: () => json(ROOMS),
+    audio: () => json(AUDIO),
+    songs: () => json(SONGS),
+    status: () => json({ success: true, data: { pin: 'on', pin_min_length: 6 } })
+  };
   global.fetch = jest.fn((url) => {
+    if (url.includes('admin_status.php')) return Promise.resolve(responses.status());
     if (url.includes('rooms.php')) return Promise.resolve(responses.rooms());
     if (url.includes('audio.php')) return Promise.resolve(responses.audio());
     if (url.includes('songs.php?uid=song_big')) return Promise.resolve(json({ success: true, data: { song_data: { ...songData, tracks: [{ id: 9, name: 'big', clips: [] }] } } }));
@@ -122,6 +128,8 @@ test('共有された音の一覧を開いただけでは全ファイルをダ�
   fireEvent.click(screen.getByRole('tab', { name: /共有された音 \(1\)/ }));
   const audio = document.querySelector('.audio-section audio');
   expect(audio.getAttribute('preload')).toBe('none');
+  // 共有された音の一覧は、部屋の ID と部屋番号の両方を送って読み込む
+  expect(global.fetch.mock.calls.map(([url]) => url)).toContain('/api/audio.php?room_id=3&room_number=101');
   // 先生が聞いただけでは、生徒の音の「もらった人」の数に数えない
   expect(audio.getAttribute('src')).toBe('/api/download.php?uid=audio_x&preview=1');
   expect(screen.getByText('太鼓')).toBeInTheDocument(); // tags が null でも表示できる
@@ -132,8 +140,21 @@ test('楽曲の読み込みに失敗しても、共有された音の一覧は�
   render(<AdminPage />);
   fireEvent.click(await screen.findByRole('button', { name: '部屋 101 を開く' }));
   expect(await screen.findByRole('alert')).toHaveTextContent('生徒の楽曲を読み込めませんでした');
+  // 「まだありません」「(0)」ではなく、読み込めなかったと出す
+  const songsTab = screen.getByRole('tab', { name: /生徒の楽曲/ });
+  expect(songsTab).not.toHaveTextContent('(0)');
+  expect(screen.getByRole('tabpanel')).toHaveTextContent('生徒の楽曲を読み込めませんでした。上の「読み込み直す」を押してください。');
+  expect(screen.queryByText('この部屋に送られた楽曲はまだありません')).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('tab', { name: /共有された音 \(1\)/ }));
   expect(screen.getByText('太鼓')).toBeInTheDocument();
+});
+
+test('「読み込み直す」では、見ていたタブのままにする', async () => {
+  await openRoom();
+  fireEvent.click(screen.getByRole('tab', { name: /共有された音/ }));
+  fireEvent.click(screen.getByRole('button', { name: /読み込み直す/ }));
+  await waitFor(() => expect(screen.queryByText('読み込み中...')).not.toBeInTheDocument());
+  expect(screen.getByRole('tab', { name: /共有された音/ })).toHaveAttribute('aria-selected', 'true');
 });
 
 test('文字列でないタグや名前が届いても画面が止まらない', async () => {
@@ -149,16 +170,70 @@ test('文字列でないタグや名前が届いても画面が止まらない',
 test('先生用の暗証番号を入力すると、サーバーへの要求に付けて送る', async () => {
   render(<AdminPage />);
   await screen.findByRole('button', { name: '部屋 101 を開く' });
-  fireEvent.change(screen.getByLabelText(/先生用の暗証番号/), { target: { value: ' 4321 ' } });
+  fireEvent.change(screen.getByLabelText(/先生用の暗証番号/), { target: { value: ' ongaku2026 ' } });
   fireEvent.click(screen.getByRole('button', { name: '入力' }));
-  expect(screen.getByRole('status')).toHaveTextContent('暗証番号を入力しました');
-  expect(sessionStorage.getItem('sound-library-admin-pin')).toBe('4321');
+  expect(document.querySelector('.admin-message-region')).toHaveTextContent('暗証番号を入力しました');
+  expect(sessionStorage.getItem('sound-library-admin-pin')).toBe('ongaku2026');
+  await screen.findByRole('button', { name: '部屋 101 を削除' });
 
   fireEvent.click(screen.getByRole('button', { name: '部屋 101 を削除' }));
   await waitFor(() => {
     const call = global.fetch.mock.calls.find(([url, options]) => url.includes('rooms.php?id=3') && options && options.method === 'DELETE');
-    expect(call[1].headers['X-Admin-Pin']).toBe('4321');
+    expect(call[1].headers['X-Admin-Pin']).toBe('ongaku2026');
   });
+});
+
+test('全角で入れた暗証番号は半角にして送り、日本語の暗証番号は送らずに知らせる', async () => {
+  render(<AdminPage />);
+  await screen.findByRole('button', { name: '部屋 101 を開く' });
+  const pinInput = screen.getByLabelText(/先生用の暗証番号/);
+  // ブラウザは日本語を HTTP ヘッダーで送れず、以前はすべての読み込みが失敗していた
+  fireEvent.change(pinInput, { target: { value: 'さくら' } });
+  fireEvent.click(screen.getByRole('button', { name: '入力' }));
+  expect(screen.getByRole('alert')).toHaveTextContent('暗証番号は半角の英数字・記号で入力してください');
+  expect(sessionStorage.getItem('sound-library-admin-pin')).toBeNull();
+
+  fireEvent.change(pinInput, { target: { value: '１２３４５６' } });
+  fireEvent.click(screen.getByRole('button', { name: '入力' }));
+  expect(sessionStorage.getItem('sound-library-admin-pin')).toBe('123456');
+  expect(pinInput).toHaveValue('123456');
+  // 暗証番号を入れ直したら、部屋の一覧も読み込み直す（暗証番号を付けて）
+  await waitFor(() => {
+    const roomsCalls = global.fetch.mock.calls.filter(([url]) => url === '/api/rooms.php');
+    expect(roomsCalls[roomsCalls.length - 1][1].headers['X-Admin-Pin']).toBe('123456');
+  });
+});
+
+test('前に保存された暗証番号が送れない文字なら使わない（すべての読み込みが失敗しないように）', async () => {
+  sessionStorage.setItem('sound-library-admin-pin', 'さくら');
+  render(<AdminPage />);
+  await screen.findByRole('button', { name: '部屋 101 を開く' });
+  const [, options] = global.fetch.mock.calls.find(([url]) => url === '/api/rooms.php');
+  expect(options.headers['X-Admin-Pin']).toBeUndefined();
+});
+
+test('暗証番号を入れていないときに部屋の一覧を断られたら、入力する場所を案内する', async () => {
+  responses.rooms = () => json({ success: false, error: '先生用の暗証番号が違います' }, 401);
+  render(<AdminPage />);
+  expect(await screen.findByRole('alert')).toHaveTextContent('先生用の暗証番号が違います。右上の「先生用の暗証番号」に入力してください。');
+});
+
+test('サーバーで暗証番号を設定していなければ、誰でも削除できることを知らせる', async () => {
+  responses.status = () => json({ success: true, data: { pin: 'off' } });
+  render(<AdminPage />);
+  expect(await screen.findByText(/暗証番号が設定されていません/)).toBeInTheDocument();
+});
+
+test('サーバーの暗証番号の設定が使えない値なら知らせる', async () => {
+  responses.status = () => json({ success: true, data: { pin: 'invalid' } });
+  render(<AdminPage />);
+  expect(await screen.findByRole('alert')).toHaveTextContent('サーバーの暗証番号の設定が正しくありません');
+});
+
+test('暗証番号が設定されていれば、注意は出さない（古いサーバーで分からないときも出さない）', async () => {
+  render(<AdminPage />);
+  await screen.findByRole('button', { name: '部屋 101 を開く' });
+  expect(screen.queryByText(/暗証番号が設定されていません/)).not.toBeInTheDocument();
 });
 
 test('暗証番号が違うときはサーバーのメッセージを表示する', async () => {
@@ -175,6 +250,8 @@ test('部屋を作成すると一覧を読み込み直し、ページ内で知�
   global.fetch.mockImplementationOnce(() => Promise.resolve(json({ success: true, data: { id: 4, room_number: 102 } })));
   fireEvent.change(screen.getByLabelText(/部屋番号/), { target: { value: '1a02' } });
   expect(screen.getByLabelText(/部屋番号/)).toHaveValue('102'); // 数字だけ入力できる
+  fireEvent.change(screen.getByLabelText(/部屋番号/), { target: { value: '１０２' } });
+  expect(screen.getByLabelText(/部屋番号/)).toHaveValue('102'); // 全角の数字も使える
   fireEvent.click(screen.getByRole('button', { name: /部屋を作成/ }));
   expect(await screen.findByText('部屋 102 を作成しました。')).toBeInTheDocument();
   expect(window.alert).not.toHaveBeenCalled();

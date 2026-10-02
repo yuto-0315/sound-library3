@@ -27,10 +27,7 @@
   min-width: 0;
 }
 
-.admin-message-region:empty {
-  display: none;
-}
-
+/* お知らせの場所は空でも消さない（display: none にすると、読み上げソフトがあとから入ったお知らせを読まないことがある） */
 .admin-message-region .notice {
   margin: 0 0 12px;
 }
@@ -251,4 +248,8 @@
     max-width: 100%;
     width: 100%;
   }
+}
+
+.admin-pin-status {
+  margin: 0 0 12px;
 }

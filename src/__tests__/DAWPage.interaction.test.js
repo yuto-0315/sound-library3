@@ -719,11 +719,14 @@ describe('クラウド保存', () => {
     await openDialogAndSave();
     expect(await screen.findByText(/を先生に送りました！/)).toBeInTheDocument();
     expect(window.alert).not.toHaveBeenCalled();
-    // 他のページと同じ API の置き場所（src/utils/api.js の API_BASE_URL）を使う
-    expect(global.fetch.mock.calls.map(([url]) => url)).toEqual(['/api/rooms.php', '/api/songs.php']);
+    // 他のページと同じ API の置き場所（src/utils/api.js の API_BASE_URL）を使う。
+    // 部屋の一覧は先生だけが見られるので、部屋番号で 1 つだけ探す
+    expect(global.fetch.mock.calls.map(([url]) => url)).toEqual(['/api/rooms.php?room_number=101', '/api/songs.php']);
     const [, options] = global.fetch.mock.calls.find(([url]) => url.includes('songs'));
     const body = JSON.parse(options.body);
     expect(body.room_id).toBe(7);
+    // サーバーは部屋の ID と部屋番号の両方を確かめる
+    expect(body.room_number).toBe('101');
     expect(body.song_data.sounds).toEqual([]);
     expect(Object.keys(body.song_data.assets)).toHaveLength(1);
     expect(body.song_data.tracks[0].clips).toHaveLength(2);
@@ -768,7 +771,46 @@ describe('クラウド保存', () => {
     mockFetch();
     await renderDAW();
     const dialog = await openDialogAndSave('999');
-    expect(await within(dialog).findByText('指定された部屋番号が見つかりません')).toBeInTheDocument();
+    expect(await within(dialog).findByText('部屋 999 が見つかりません。先生に部屋番号を確かめてください。')).toBeInTheDocument();
+  });
+
+  test('キーボードの「次へ」（Enter）では送らず、次の欄へ移る。最後の欄ではキーボードを閉じる', async () => {
+    mockFetch();
+    await seedProject([drumClip(1, 0)]);
+    await renderDAW();
+    fireEvent.click(screen.getByRole('button', { name: '先生に送る' }));
+    const dialog = screen.getByRole('dialog');
+    const title = within(dialog).getByLabelText(/曲のタイトル/);
+    const room = within(dialog).getByLabelText(/部屋番号/);
+    const name = within(dialog).getByLabelText('あなたの名前');
+    const group = within(dialog).getByLabelText('班の番号');
+    fireEvent.change(room, { target: { value: '101' } });
+    expect(title).toHaveFocus();
+    // 以前は曲名を入れて「次へ」を押すと、名前も班も無いまま先生に送られていた
+    fireEvent.keyDown(title, { key: 'Enter', keyCode: 13 });
+    expect(room).toHaveFocus();
+    fireEvent.keyDown(room, { key: 'Enter', keyCode: 13 });
+    expect(name).toHaveFocus();
+    // 日本語入力の確定の Enter では移らない
+    fireEvent.keyDown(name, { key: 'Enter', keyCode: 229 });
+    expect(name).toHaveFocus();
+    fireEvent.keyDown(name, { key: 'Enter', keyCode: 13 });
+    expect(group).toHaveFocus();
+    expect(group).toHaveAttribute('enterkeyhint', 'done');
+    fireEvent.keyDown(group, { key: 'Enter', keyCode: 13 });
+    expect(group).not.toHaveFocus();
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+
+  test('全角で入れた部屋番号も半角にする（iPad の日本語入力）', async () => {
+    mockFetch();
+    await seedProject([drumClip(1, 0)]);
+    await renderDAW();
+    const dialog = await openDialogAndSave('１０１');
+    expect(within(dialog).getByLabelText(/部屋番号/)).toHaveValue('101');
+    expect(await screen.findByText(/を先生に送りました！/)).toBeInTheDocument();
+    expect(global.fetch.mock.calls[0][0]).toBe('/api/rooms.php?room_number=101');
   });
 
   test('サーバーのエラーを表示し、ダイアログは閉じない', async () => {

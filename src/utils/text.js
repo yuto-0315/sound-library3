@@ -35,3 +35,12 @@ export const matchesSearch = (query, ...fields) => {
   if (!needle) return true;
   return fields.flat().some((field) => normalizeForSearch(field).includes(needle));
 };
+
+// 全角の数字・英字を半角にそろえる（iPad の日本語入力で「１０１」と入っても使えるように）
+export const toHalfWidth = (value) => {
+  const text = toText(value);
+  return typeof text.normalize === 'function' ? text.normalize('NFKC') : text;
+};
+
+// 部屋番号の入力欄: 全角の数字は半角にし、数字以外は除く
+export const normalizeRoomNumberInput = (value) => toHalfWidth(value).replace(/[^0-9]/g, '');

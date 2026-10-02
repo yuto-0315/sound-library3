@@ -108,9 +108,20 @@ describe('部屋に入る', () => {
     expect(screen.getByText('（1年1組）')).toBeInTheDocument();
     expect(storage['sound-library-room']).toBe('101');
     expect(await screen.findByText('みんなの太鼓')).toBeInTheDocument();
-    expect(global.fetch.mock.calls.map(([url]) => url)).toContainEqual(expect.stringContaining('audio.php?room_id=3'));
+    const urls = global.fetch.mock.calls.map(([url]) => url);
+    // 部屋の一覧は先生だけが見られる。部屋番号で 1 つだけ探し、一覧の読み込みでも部屋番号を送る
+    expect(urls).toContain('/api/rooms.php?room_number=101');
+    expect(urls).toContainEqual(expect.stringContaining('audio.php?room_id=3&room_number=101'));
     // 以前はこのページだけ '../api' を使っていた。他のページと同じ '/api' にそろえた
     global.fetch.mock.calls.forEach(([url]) => expect(url).toMatch(/^\/api\/(rooms|audio)\.php/));
+  });
+
+  test('全角の数字で入れた部屋番号でも入れる（iPad の日本語入力）', async () => {
+    render(<CloudPage />);
+    typeRoomAndJoin('１０１');
+    expect(await screen.findByRole('button', { name: /部屋を出る/ })).toBeInTheDocument();
+    expect(storage['sound-library-room']).toBe('101');
+    expect(global.fetch.mock.calls[0][0]).toBe('/api/rooms.php?room_number=101');
   });
 
   test('前回の部屋に自動で入り、「みんなの音」に数を出す', async () => {
@@ -253,10 +264,38 @@ describe('みんなの音', () => {
     // 今ある音の「もらった人」の数は新しくする
     expect(within(cardFor('みんなの太鼓')).getByText('3人がもらいました')).toBeInTheDocument();
 
+    // 読み上げにも伝わるよう、お知らせは live region の中に出す
+    expect(banner.closest('[role="status"]')).not.toBeNull();
+
     fireEvent.click(banner);
     expect(screen.getAllByRole('heading', { level: 4 }).map((h) => h.textContent)).toEqual(['チャイム', 'みんなの太鼓', 'カエルの声']);
     expect(screen.queryByRole('button', { name: /新しい音が/ })).not.toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /みんなの音/ })).toHaveTextContent('3');
+    // 押したお知らせが消えても、フォーカスがページの先頭に飛ばず、いちばん新しい音に移る
+    await waitFor(() => expect(screen.getByRole('button', { name: 'チャイムをきく' })).toHaveFocus());
+  });
+
+  test('部屋に入った直後の読み込みを自動の読み込み直しが追い越して失敗しても、「読み込み中...」のまま止まらない', async () => {
+    let resolveFirst;
+    responses.list = () => new Promise((resolve) => { resolveFirst = resolve; });
+    const addListener = jest.spyOn(document, 'addEventListener');
+    storage['sound-library-room'] = '101';
+    render(<CloudPage />);
+    await screen.findByRole('button', { name: /部屋を出る/ });
+    await waitFor(() => expect(addListener).toHaveBeenCalledWith('visibilitychange', expect.any(Function)));
+    expect(screen.getByText('読み込み中...', { selector: '.cloud-loading' })).toBeInTheDocument();
+    // 画面に戻ってきたときの読み込みが失敗する（オフラインなど）
+    responses.list = () => Promise.reject(new TypeError('Failed to fetch'));
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    expect(await screen.findByRole('alert')).toHaveTextContent('みんなの音を読み込めませんでした');
+    expect(screen.queryByText('読み込み中...', { selector: '.cloud-loading' })).not.toBeInTheDocument();
+    // 追い越された最初の読み込みの結果は使わない
+    await act(async () => {
+      resolveFirst(jsonResponse(FILES));
+    });
+    expect(screen.queryByText('みんなの太鼓')).not.toBeInTheDocument();
   });
 
   test('画面に戻ってきたときも読み込み直す', async () => {
@@ -508,6 +547,7 @@ describe('自分の音を共有する', () => {
     expect(file.type).toBe('audio/mp4');
     expect(readBlobBytes(file).length).toBe(46);
     expect(sentForm.get('room_id')).toBe('3');
+    expect(sentForm.get('room_number')).toBe('101');
     expect(sentForm.get('file_name')).toBe('たいこ/ドン');
     expect(sentForm.get('student_name')).toBe('たろう');
     expect(JSON.parse(sentForm.get('tags'))).toEqual(['楽器', 'ドン']);
@@ -575,6 +615,19 @@ describe('自分の音を共有する', () => {
     jest.spyOn(audioUtils, 'dataUrlToBlob').mockReturnValue({ size: 21 * 1024 * 1024, type: 'audio/wav' });
     fireEvent.click(shareButton());
     expect(await screen.findByRole('alert')).toHaveTextContent('大きすぎて共有できません（20MB まで）');
+    expect(postCount()).toBe(0);
+  });
+
+  test('名前の欄で「次へ」（Enter）を押すと、次の欄へ移る', async () => {
+    await renderInRoom();
+    openShareTab();
+    const name = screen.getByLabelText('共有するときの音の名前');
+    const student = screen.getByLabelText(/あなたの名前/);
+    name.focus();
+    fireEvent.keyDown(name, { key: 'Enter', keyCode: 13 });
+    expect(student).toHaveFocus();
+    fireEvent.keyDown(student, { key: 'Enter', keyCode: 13 });
+    expect(screen.getByRole('textbox', { name: 'タグ' })).toHaveFocus();
     expect(postCount()).toBe(0);
   });
 

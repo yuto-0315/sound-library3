@@ -7,9 +7,14 @@ ini_set('log_errors', 1);
 require_once 'config.php';
 require_once 'admin_auth.php';
 require_once 'validation.php';
+require_once 'room_access.php';
 
 setCORSHeaders();
 allowAdminPinHeader();
+
+// 1 つの部屋に送れる楽曲の合計（音声入りなので大きい。同じ操作を繰り返してサーバーのディスクが
+// いっぱいになるのを防ぐ。共有される音の上限 api/audio.php と同じ）
+const SONG_ROOM_MAX_TOTAL_BYTES = 1024 * 1024 * 1024;
 
 $method = $_SERVER['REQUEST_METHOD'];
 
@@ -138,7 +143,8 @@ function handleGetSongDetail($pdo, $uid) {
 
 // 楽曲保存
 function handleSaveSong($pdo) {
-    $input = json_decode(file_get_contents('php://input'), true);
+    $rawInput = file_get_contents('php://input');
+    $input = json_decode($rawInput, true);
     if (!is_array($input)) {
         // post_max_size を超えると本文が空になる
         sendError('楽曲データを読み取れませんでした。データが大きすぎる可能性があります。', 413);
@@ -151,10 +157,8 @@ function handleSaveSong($pdo) {
     $songTitle = readText($input['song_title'] ?? null, 255);
     $songData = $input['song_data'] ?? null;
 
-    if (!$roomId || !is_numeric($roomId)) {
-        sendError('部屋IDは必須です');
-        return;
-    }
+    // 部屋番号も合っているときだけ受け付ける（部屋の ID は順番なので、ID だけだとどの部屋にも送れた）
+    requireRoomAccess($pdo, $roomId, $input['room_number'] ?? null);
 
     if ($songTitle === null) {
         sendError('楽曲タイトルは必須です');
@@ -178,11 +182,10 @@ function handleSaveSong($pdo) {
         }
     }
 
-    // 部屋の存在確認
-    $roomStmt = $pdo->prepare("SELECT id FROM rooms WHERE id = ?");
-    $roomStmt->execute([$roomId]);
-    if (!$roomStmt->fetch()) {
-        sendError('指定された部屋が見つかりません', 404);
+    $totalStmt = $pdo->prepare("SELECT COALESCE(SUM(LENGTH(song_data)), 0) FROM song_data WHERE room_id = ?");
+    $totalStmt->execute([$roomId]);
+    if ((int)$totalStmt->fetchColumn() + strlen((string)$rawInput) > SONG_ROOM_MAX_TOTAL_BYTES) {
+        sendError('この部屋に送れる楽曲の量の上限に達しました。先生に古い楽曲を削除してもらってください。', 413);
         return;
     }
 

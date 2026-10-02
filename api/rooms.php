@@ -2,6 +2,7 @@
 require_once 'config.php';
 require_once 'admin_auth.php';
 require_once 'validation.php';
+require_once 'room_access.php';
 
 setCORSHeaders();
 allowAdminPinHeader();
@@ -13,8 +14,14 @@ try {
 
     switch ($method) {
         case 'GET':
-            // 部屋の一覧は、生徒が部屋に入るときにも使う
-            handleGetRooms($pdo);
+            if (isset($_GET['room_number'])) {
+                // 生徒が部屋に入るとき: 部屋番号で 1 つだけ探す
+                handleFindRoom($pdo, $_GET['room_number']);
+            } else {
+                // 部屋の一覧（ほかのクラスの部屋名・先生の名前も入る）は先生だけ
+                requireAdmin();
+                handleGetRooms($pdo);
+            }
             break;
         case 'POST':
             requireAdmin();
@@ -33,7 +40,19 @@ try {
     sendError('サーバーエラーが発生しました', 500);
 }
 
-// 部屋一覧取得
+// 部屋番号で部屋を探す（見つからなければ空の一覧）。
+// 以前は生徒の画面が部屋の一覧を丸ごと読み込んでから探していたため、誰でも全部の部屋の番号・名前・
+// 先生の名前を見られた。一覧と同じ形（配列）で返すので、古い画面・新しい画面のどちらでも使える
+function handleFindRoom($pdo, $roomNumber) {
+    if (readRoomNumber($roomNumber) === null) {
+        sendError('部屋番号は数字で入れてください');
+        return;
+    }
+    $room = findRoomByNumber($pdo, $roomNumber);
+    sendSuccess($room ? [$room] : [], $room ? '部屋が見つかりました' : '部屋が見つかりません');
+}
+
+// 部屋一覧取得（先生用）
 function handleGetRooms($pdo) {
     $sql = "SELECT id, room_number, room_name, teacher_name, created_at FROM rooms ORDER BY room_number";
     $stmt = $pdo->prepare($sql);

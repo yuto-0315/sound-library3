@@ -43,8 +43,8 @@ import {
   saveStudentProfile
 } from '../utils/api';
 import { formatDateJa } from '../utils/date';
-import { isEnterKey } from '../utils/keyboard';
-import { matchesSearch, toTagList, toText } from '../utils/text';
+import { focusNextFieldOnEnter, isEnterKey } from '../utils/keyboard';
+import { matchesSearch, toHalfWidth, toTagList, toText } from '../utils/text';
 import { formatDuration } from '../utils/timing';
 
 const ROOM_STORAGE_KEY = 'sound-library-room';
@@ -157,6 +157,8 @@ const CloudPage = () => {
   const currentRoomRef = useRef(null);
   const joinRequestRef = useRef(0);
   const listRequestRef = useRef(0);
+  // 一覧を一度でも読み込めたか（まだなら、自動の読み込み直しの失敗も知らせる）
+  const hasLoadedListRef = useRef(false);
   const sharedFilesRef = useRef(sharedFiles);
   sharedFilesRef.current = sharedFiles;
   const playerRef = useRef(null);
@@ -182,9 +184,13 @@ const CloudPage = () => {
   // quiet: 自動の読み込み直し。失敗しても知らせず、新しい音が届いてもすぐには並べ替えない
   const loadSharedFiles = useCallback(async (room, { quiet = false } = {}) => {
     const requestId = ++listRequestRef.current;
+    // 部屋に入った直後の読み込みを自動の読み込み直しが追い越したときも、失敗したら知らせる
+    // （知らせないと「読み込み中...」のまま止まって見えた）
+    const reportErrors = !quiet || !hasLoadedListRef.current;
     if (!quiet) setIsRefreshing(true);
     try {
-      const params = new URLSearchParams({ room_id: room.id });
+      // サーバーは部屋の ID と部屋番号の両方を確かめる（ID だけではほかの部屋を見られないように）
+      const params = new URLSearchParams({ room_id: room.id, room_number: room.room_number });
       const data = await fetchJson(`${API_BASE_URL}/audio.php?${params}`);
       if (requestId !== listRequestRef.current || !isMountedRef.current) return;
       if (!data.success) throw new Error(data.error || 'みんなの音を読み込めませんでした');
@@ -202,12 +208,14 @@ const CloudPage = () => {
         setPendingFiles(null);
       }
       setListError('');
+      hasLoadedListRef.current = true;
       setHasLoadedList(true);
     } catch (error) {
       if (requestId !== listRequestRef.current || !isMountedRef.current) return;
       console.error('Load audio files error:', error);
-      if (!quiet) {
+      if (reportErrors) {
         setListError('みんなの音を読み込めませんでした。インターネットにつながっているか確かめて、「最新にする」を押してください。');
+        hasLoadedListRef.current = true;
         setHasLoadedList(true);
       }
     } finally {
@@ -217,7 +225,8 @@ const CloudPage = () => {
 
   // ===== 部屋に入る =====
   const joinRoom = async (value, { auto = false } = {}) => {
-    const number = String(value === undefined || value === null ? '' : value).trim();
+    // iPad の日本語入力で「１０１」と全角で入っても使えるようにする
+    const number = toHalfWidth(value).trim();
     if (!ROOM_NUMBER_PATTERN.test(number)) {
       setJoinError('部屋番号は数字で入れてください（例: 101）');
       return;
@@ -226,7 +235,8 @@ const CloudPage = () => {
     setIsJoining(true);
     setJoinError('');
     try {
-      const data = await fetchJson(`${API_BASE_URL}/rooms.php`);
+      // 部屋番号で 1 つだけ探す（部屋の一覧は先生だけが見られる。古いサーバーは一覧を返すが、同じように探せる）
+      const data = await fetchJson(`${API_BASE_URL}/rooms.php?${new URLSearchParams({ room_number: number })}`);
       if (requestId !== joinRequestRef.current || !isMountedRef.current) return;
       if (!data.success) {
         setJoinError(data.error || '部屋の情報を読み込めませんでした');
@@ -243,6 +253,7 @@ const CloudPage = () => {
       saveRoomNumber(number);
       setSharedFiles([]);
       setPendingFiles(null);
+      hasLoadedListRef.current = false;
       setHasLoadedList(false);
       setListError('');
       setListNotice(null);
@@ -433,6 +444,7 @@ const CloudPage = () => {
     const formData = new FormData();
     formData.append('audio_file', audioBlob, `${toSafeFileName(finalName)}.${getExtensionForMimeType(audioBlob.type)}`);
     formData.append('room_id', room.id);
+    formData.append('room_number', room.room_number);
     formData.append('file_name', finalName);
     formData.append('student_name', studentName.trim());
     formData.append('tags', JSON.stringify(tags));
@@ -465,6 +477,7 @@ const CloudPage = () => {
     setCurrentRoom(null);
     setSharedFiles([]);
     setPendingFiles(null);
+    hasLoadedListRef.current = false;
     setHasLoadedList(false);
     setIsRefreshing(false);
     setListError('');
@@ -649,6 +662,16 @@ const SharedSoundsPanel = ({
     matchesSearch(query, file.name, file.studentName, file.tags)
   )), [files, selectedTag, query]);
 
+  const listRef = useRef(null);
+  const showPending = () => {
+    onShowPending();
+    // 押したお知らせは消えるので、いちばん新しい音（先頭）の ▶ にフォーカスを移す
+    setTimeout(() => {
+      const first = listRef.current && listRef.current.querySelector('.cloud-play-button');
+      if (first) first.focus();
+    }, 0);
+  };
+
   const isFiltered = !!(selectedTag || query.trim());
   const newCount = pendingFiles
     ? pendingFiles.filter((file) => !files.some((current) => current.uid === file.uid)).length
@@ -701,11 +724,14 @@ const SharedSoundsPanel = ({
         )}
       </div>
 
-      {newCount > 0 && (
-        <button type="button" className="cloud-new-banner" onClick={onShowPending}>
-          <Icon icon={Sparkles} /> 新しい音が {newCount} こ届きました。ここを押すと表示します
-        </button>
-      )}
+      {/* 読み上げにも伝わるよう、お知らせは live region の中に出す */}
+      <div className="cloud-new-region" role="status" aria-live="polite">
+        {newCount > 0 && (
+          <button type="button" className="cloud-new-banner" onClick={showPending}>
+            <Icon icon={Sparkles} /> 新しい音が {newCount} こ届きました。ここを押すと表示します
+          </button>
+        )}
+      </div>
 
       <div className="cloud-status-region" role="status" aria-live="polite">
         {notice && notice.type === 'success' && (
@@ -749,7 +775,7 @@ const SharedSoundsPanel = ({
           {isFiltered && (
             <p className="cloud-count">{visibleFiles.length} こ見つかりました（全部で {files.length} こ）</p>
           )}
-          <ul className="cloud-sound-grid">
+          <ul className="cloud-sound-grid" ref={listRef}>
             {visibleFiles.map((file) => (
               <SharedSoundCard
                 key={file.uid}
@@ -994,7 +1020,7 @@ const ShareSoundPanel = ({
                 maxLength={50}
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                onKeyDown={preventEnterSubmit}
+                onKeyDown={focusNextFieldOnEnter}
                 enterKeyHint="next"
                 placeholder={selectedSound ? selectedSound.name : '音をえらぶと名前が入ります'}
               />
@@ -1011,7 +1037,7 @@ const ShareSoundPanel = ({
                 autoComplete="off"
                 value={studentName}
                 onChange={(e) => setStudentName(e.target.value)}
-                onKeyDown={preventEnterSubmit}
+                onKeyDown={focusNextFieldOnEnter}
                 enterKeyHint="next"
                 aria-describedby="cloud-student-name-help"
               />

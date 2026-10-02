@@ -17,6 +17,7 @@ import {
   getSupportedRecordingMimeType,
   isAudioFile,
   isIOSDevice,
+  measureAudioDuration,
   normalizeAudioDataUrl,
   parseDataUrl,
   primeAudioElement,
@@ -455,3 +456,45 @@ describe('encodeWav（音源出力）', () => {
     expect(blob.size).toBe(44);
   });
 });
+
+describe('measureAudioDuration（音の長さを調べる）', () => {
+  beforeEach(() => {
+    global.FileReader = TestFileReader;
+  });
+
+  afterEach(() => {
+    delete window.OfflineAudioContext;
+    global.FileReader = originalFileReader;
+  });
+
+  const blob = () => new Blob([makeAudioBytes('mp4', 20)], { type: 'audio/mp4' });
+
+  test('音を出さない OfflineAudioContext でデコードし、小数第 2 位までの秒を返す', async () => {
+    const decode = jest.fn((buffer, ok) => {
+      ok({ duration: 2.3456 });
+    });
+    window.OfflineAudioContext = jest.fn(() => ({ decodeAudioData: decode }));
+    const realtime = jest.fn();
+    window.AudioContext = realtime;
+    await expect(measureAudioDuration(blob())).resolves.toBe(2.35);
+    expect(window.OfflineAudioContext).toHaveBeenCalledWith(1, 1, 44100);
+    expect(realtime).not.toHaveBeenCalled(); // iPad で数に上限のある AudioContext は作らない
+  });
+
+  test('OfflineAudioContext が無ければ AudioContext で測り、測り終えたら閉じる', async () => {
+    const ctx = createMockAudioContext();
+    window.AudioContext = jest.fn(() => ctx);
+    const seconds = await measureAudioDuration(blob());
+    expect(seconds).toBeGreaterThan(0);
+    expect(ctx.close).toHaveBeenCalled();
+  });
+
+  test('デコードできない・長さが分からないときは null', async () => {
+    window.OfflineAudioContext = jest.fn(() => ({ decodeAudioData: (buffer, ok, ng) => ng(new Error('bad')) }));
+    await expect(measureAudioDuration(blob())).resolves.toBeNull();
+    window.OfflineAudioContext = jest.fn(() => ({ decodeAudioData: (buffer, ok) => ok({ duration: Infinity }) }));
+    await expect(measureAudioDuration(blob())).resolves.toBeNull();
+    await expect(measureAudioDuration(null)).resolves.toBeNull();
+  });
+});
+

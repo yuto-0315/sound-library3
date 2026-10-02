@@ -229,6 +229,35 @@ export const decodeAudioData = (ctx, arrayBuffer) => new Promise((resolve, rejec
   }
 });
 
+// 音の長さ（秒）を調べる。分からなければ null。
+// 一覧に「0.6秒」のように表示するためだけに使うので、音を出す AudioContext ではなく
+// OfflineAudioContext でデコードする（iPad では同時に作れる AudioContext の数に上限がある）。
+// MediaRecorder の録音は <audio> で長さを読むと Infinity になることがあるので、デコードして測る。
+export const measureAudioDuration = async (blob) => {
+  if (!blob) return null;
+  const OfflineClass = typeof window !== 'undefined'
+    ? (window.OfflineAudioContext || window.webkitOfflineAudioContext)
+    : null;
+  let ctx = null;
+  let ownsRealtimeContext = false;
+  try {
+    if (OfflineClass) {
+      ctx = new OfflineClass(1, 1, 44100);
+    } else {
+      ctx = createAudioContext();
+      ownsRealtimeContext = true;
+    }
+    if (!ctx || typeof ctx.decodeAudioData !== 'function') return null;
+    const buffer = await decodeAudioData(ctx, await blobToArrayBuffer(blob));
+    const seconds = buffer && buffer.duration;
+    return isFinite(seconds) && seconds > 0 ? Math.round(seconds * 100) / 100 : null;
+  } catch (error) {
+    return null;
+  } finally {
+    if (ownsRealtimeContext) closeAudioContext(ctx);
+  }
+};
+
 // iOS はユーザー操作の中で resume() しないと音が出ない。
 // await より前（タップのイベントハンドラ内で同期的に）呼ぶこと。
 export const unlockAudioContext = (ctx) => {

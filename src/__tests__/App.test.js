@@ -37,7 +37,7 @@ describe('App Component', () => {
     render(<App />);
     
     // デフォルトルートでSoundCollectionページが表示される
-    expect(screen.getByText('音あつめ')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2, name: '音あつめ' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /録音開始/i })).toBeInTheDocument();
   });
 

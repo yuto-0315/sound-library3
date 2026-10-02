@@ -88,6 +88,9 @@ body {
 }
 
 .main-content {
+  /* 見えない入力欄や読み上げ用の文字（position: absolute）を <main> の中に収める。
+     収めないとページ全体の高さが伸び、画面ごと少しスクロールしてメニューが隠れていた */
+  position: relative;
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;

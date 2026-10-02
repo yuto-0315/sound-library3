@@ -53,7 +53,7 @@ describe('Accessibility Tests', () => {
       renderWithRouter(<SoundCollection />);
       
       // メインヘッディングが存在する
-      expect(screen.getByRole('heading', { level: 2, name: /音あつめページ/ })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 2, name: '音あつめ' })).toBeInTheDocument();
       
       // セクションヘッディングが存在する
       expect(screen.getByRole('heading', { level: 3, name: /音を録音する/ })).toBeInTheDocument();

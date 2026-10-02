@@ -1,21 +1,44 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Circle, FileAudio, FolderOpen, ListMusic, Mic, Pencil, Save, Square, TabletSmartphone, X } from 'lucide-react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
+import {
+  FolderOpen,
+  ListMusic,
+  Mic,
+  Pencil,
+  Play,
+  Plus,
+  RefreshCw,
+  Save,
+  Square,
+  Trash2,
+  X
+} from 'lucide-react';
 import './SoundCollection.css';
 import Icon from '../components/Icon';
 import { useAnnouncement, useErrorMessages } from '../hooks/useAccessibility';
-import { addRecording, isQuotaExceededError, requestPersistentStorage } from '../utils/indexedDB';
+import { useAudioPreview } from '../hooks/useAudioPreview';
+import { addRecording, getAllRecordings, isQuotaExceededError, requestPersistentStorage } from '../utils/indexedDB';
 import {
   blobToAudioDataUrl,
   getSupportedRecordingMimeType,
   isAudioFile,
+  measureAudioDuration,
   withDetectedMimeType
 } from '../utils/audio';
+import { formatDuration, formatSeconds } from '../utils/timing';
 import { isEnterKey } from '../utils/keyboard';
 import { keepUnsavedDraft, takeUnsavedDraft } from '../utils/unsavedDraft';
 
 const LEGACY_RECORDINGS_KEY = 'soundRecordings';
 
+// 1 回の録音の長さの上限（止め忘れて大きな音声ができると、古い iPad では保存や読み込みが重くなる）
+export const MAX_RECORDING_SECONDS = 60;
+// 「さいきん集めた音」に出す数
+const RECENT_LIMIT = 6;
+// よく使うタグ（ライブラリにあるタグも候補に出す）
+const DEFAULT_TAG_SUGGESTIONS = ['楽器', '自然', '機械', '動物', '声', '学校', '家'];
+
 const DISCARD_CONFIRM_MESSAGE = 'まだ保存していない音があります。\n新しい音にすると、この音は消えます。よろしいですか？';
+const THROW_AWAY_CONFIRM_MESSAGE = 'この音をすてますか？\n（保存していないので、もとに戻せません）';
 
 const stopStream = (stream) => {
   if (!stream) return;
@@ -37,7 +60,7 @@ const getMicrophoneErrorMessage = (error) => {
   switch (error && error.name) {
     case 'NotAllowedError':
     case 'SecurityError':
-      return 'マイクの使用が拒否されました。iPad の「設定」アプリ →「Safari」→「マイク」を「確認」か「許可」にしてから、もう一度お試しください。';
+      return 'マイクの使用が拒否されました。下の「マイクが使えないとき」を見て、許可してからもう一度お試しください。';
     case 'NotFoundError':
     case 'OverconstrainedError':
       return 'マイクが見つかりません。デバイスにマイクが接続されているか確認してください。';
@@ -51,14 +74,21 @@ const getMicrophoneErrorMessage = (error) => {
   }
 };
 
+const byNewest = (a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''));
+
 const SoundCollection = () => {
-  const [recordings, setRecordings] = useState([]);
+  const [recentSounds, setRecentSounds] = useState([]);
+  const [libraryTags, setLibraryTags] = useState([]);
   const [isRecording, setIsRecording] = useState(false);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
   const [currentRecording, setCurrentRecording] = useState(null);
   const [isDraftRestored, setIsDraftRestored] = useState(false);
+  const [notice, setNotice] = useState('');
+  const [showMicHelp, setShowMicHelp] = useState(false);
+  const [micDenied, setMicDenied] = useState(false);
   const fileInputRef = useRef(null);
-  const recordButtonRef = useRef(null);
 
   // 非同期処理やアンマウント時の後片付けで最新の値を参照するための ref
   const mediaRecorderRef = useRef(null);
@@ -66,22 +96,28 @@ const SoundCollection = () => {
   const isStartingRef = useRef(false);
   const isMountedRef = useRef(true);
   const objectUrlsRef = useRef(new Set());
-  const savingUrlRef = useRef(null); // 保存中の音の URL（解放しない）
-  const savedUrlsRef = useRef(new Set()); // 「最近録音した音」で使っている URL（解放しない）
+  const savingUrlRef = useRef(null); // 保存中の音の URL（保存が終わるまで解放しない）
   const currentRecordingRef = useRef(currentRecording);
   currentRecordingRef.current = currentRecording;
   const editorFieldsRef = useRef(null); // 編集中の名前・タグ（ページを離れるときに覚えておくため）
+  const recordingStartedAtRef = useRef(0);
+  const timerRef = useRef(null);
+  const stopRecordingRef = useRef(null);
 
   // アクセシビリティフック
   const { announce, AnnouncementRegion } = useAnnouncement();
   const { showError, clearError, ErrorRegion } = useErrorMessages();
+  const preview = useAudioPreview({
+    onError: () => {
+      if (isMountedRef.current) setNotice('この音はこの端末では再生できませんでした。');
+    }
+  });
 
   // アンマウント時だけ後片付けする。
   // （以前は録音一覧が変わるたびに実行され、表示中の音の URL まで解放して再生できなくなっていた）
   useEffect(() => {
     isMountedRef.current = true;
     const objectUrls = objectUrlsRef.current;
-    const savedUrls = savedUrlsRef.current;
 
     // 前にこのページを離れたときの、保存していない音を戻す（URL は下の effect で描画後に作る）
     const draft = takeUnsavedDraft();
@@ -92,8 +128,9 @@ const SoundCollection = () => {
 
     return () => {
       isMountedRef.current = false;
+      if (timerRef.current) clearInterval(timerRef.current);
       const unsaved = currentRecordingRef.current;
-      if (unsaved && unsaved.audioBlob && unsaved.url !== savingUrlRef.current && !savedUrls.has(unsaved.url)) {
+      if (unsaved && unsaved.audioBlob && unsaved.url !== savingUrlRef.current) {
         const fields = editorFieldsRef.current || {};
         keepUnsavedDraft({
           audioBlob: unsaved.audioBlob,
@@ -118,6 +155,25 @@ const SoundCollection = () => {
     };
   }, []);
 
+  // 前に集めた音（新しい順）と、タグの候補を読み込む。
+  // （以前は「このページで保存した音」だけを出していて、戻ってくると「まだ録音した音がありません」と表示され、
+  //   音が消えたように見えていた）
+  useEffect(() => {
+    let cancelled = false;
+    getAllRecordings()
+      .then((records) => {
+        if (cancelled) return;
+        setRecentSounds([...records].sort(byNewest).slice(0, RECENT_LIMIT));
+        setLibraryTags([...new Set(records.flatMap((record) => record.tags || []))]);
+      })
+      .catch((error) => {
+        console.warn('前に集めた音を読み込めませんでした:', error);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // 復元した音の再生用 URL を作る。
   // マウント時の effect の中で作ると、開発時の StrictMode の二重実行で後片付けに解放されてしまう。
   useEffect(() => {
@@ -126,6 +182,20 @@ const SoundCollection = () => {
       objectUrlsRef.current.add(url);
       setCurrentRecording((prev) => (prev === currentRecording ? { ...prev, url } : prev));
     }
+  }, [currentRecording]);
+
+  // 音の長さを調べる（編集画面に表示し、保存するときにも記録する）
+  useEffect(() => {
+    if (!currentRecording || !currentRecording.audioBlob || currentRecording.duration !== undefined) return undefined;
+    let cancelled = false;
+    const target = currentRecording;
+    measureAudioDuration(target.audioBlob).then((duration) => {
+      if (cancelled || !isMountedRef.current) return;
+      setCurrentRecording((prev) => (prev && prev.audioBlob === target.audioBlob ? { ...prev, duration } : prev));
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [currentRecording]);
 
   const createObjectUrl = (blob) => {
@@ -141,20 +211,21 @@ const SoundCollection = () => {
     }
   };
 
-  // 保存していない音を捨ててよいか確認する（保存中の音は一覧に残るので確認しない）
-  const confirmDiscardUnsaved = () => {
+  // 保存していない音を捨ててよいか確認する（保存中の音は保存が終われば一覧に入るので確認しない）
+  const confirmDiscardUnsaved = (message = DISCARD_CONFIRM_MESSAGE) => {
     const current = currentRecordingRef.current;
     if (!current || current.url === savingUrlRef.current) return true;
-    return window.confirm(DISCARD_CONFIRM_MESSAGE);
+    return window.confirm(message);
   };
 
-  // 編集中の音を差し替える（保存しなかった前の音の URL は解放する。保存中の音は一覧で使うので残す）
+  // 編集中の音を差し替える（保存しなかった前の音の URL は解放する。保存中の音の URL は保存が終わるまで残す）
   // （setState の更新関数は次の描画のときに実行されるので、その時点の保存状況で判定する）
   const replaceCurrentRecording = (next) => {
     setIsDraftRestored(false);
+    setSaveError('');
+    preview.stop();
     setCurrentRecording(prev => {
-      const isInUse = prev && (prev.url === savingUrlRef.current || savedUrlsRef.current.has(prev.url));
-      if (prev && prev.url && (!next || prev.url !== next.url) && !isInUse) {
+      if (prev && prev.url && (!next || prev.url !== next.url) && prev.url !== savingUrlRef.current) {
         releaseObjectUrl(prev.url);
       }
       return next;
@@ -173,7 +244,7 @@ const SoundCollection = () => {
       try {
         const permission = await navigator.permissions.query({ name: 'microphone' });
         if (permission && permission.state === 'denied') {
-          return getMicrophoneErrorMessage({ name: 'NotAllowedError' });
+          return { message: getMicrophoneErrorMessage({ name: 'NotAllowedError' }), denied: true };
         }
       } catch (permError) {
         // Safari 15 以前は microphone の問い合わせに対応していない
@@ -187,6 +258,27 @@ const SoundCollection = () => {
     announce(message, 'assertive');
   };
 
+  const stopTimer = () => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+
+  const startTimer = () => {
+    stopTimer();
+    recordingStartedAtRef.current = Date.now();
+    setElapsedSeconds(0);
+    timerRef.current = setInterval(() => {
+      const seconds = (Date.now() - recordingStartedAtRef.current) / 1000;
+      setElapsedSeconds(seconds);
+      if (seconds >= MAX_RECORDING_SECONDS && stopRecordingRef.current) {
+        setNotice(`${MAX_RECORDING_SECONDS}秒になったので、録音を止めました。`);
+        stopRecordingRef.current();
+      }
+    }, 250);
+  };
+
   const startRecording = async () => {
     // 連打で録音が二重に始まらないようにする
     if (isStartingRef.current || mediaRecorderRef.current) return;
@@ -195,11 +287,19 @@ const SoundCollection = () => {
 
     try {
       clearError();
+      setNotice('');
+      setMicDenied(false);
       announce('録音を開始しています...', 'assertive');
 
       const supportError = await getRecordingSupportError();
       if (supportError) {
-        reportError(supportError);
+        if (typeof supportError === 'object') {
+          setMicDenied(true);
+          setShowMicHelp(true);
+          reportError(supportError.message);
+        } else {
+          reportError(supportError);
+        }
         return;
       }
 
@@ -216,6 +316,10 @@ const SoundCollection = () => {
         });
       } catch (error) {
         console.error('マイクの取得に失敗しました:', error);
+        if (error && (error.name === 'NotAllowedError' || error.name === 'SecurityError')) {
+          setMicDenied(true);
+          setShowMicHelp(true);
+        }
         reportError(getMicrophoneErrorMessage(error));
         return;
       }
@@ -264,6 +368,7 @@ const SoundCollection = () => {
           return;
         }
         // マイクが切断されたなどで自動的に止まった場合も「録音中」の表示を戻す
+        stopTimer();
         setIsRecording(false);
 
         if (blob.size === 0) {
@@ -298,7 +403,10 @@ const SoundCollection = () => {
 
       mediaRecorderRef.current = recorder;
       streamRef.current = stream;
+      // 前の音を捨てて録り直すときは、その音の編集画面を閉じる
+      replaceCurrentRecording(null);
       setIsRecording(true);
+      startTimer();
       announce('録音を開始しました。', 'assertive');
     } finally {
       isStartingRef.current = false;
@@ -306,6 +414,7 @@ const SoundCollection = () => {
   };
 
   const stopRecording = () => {
+    stopTimer();
     setIsRecording(false); // まず録音状態を停止に設定
 
     const recorder = mediaRecorderRef.current;
@@ -324,6 +433,7 @@ const SoundCollection = () => {
     }
     announce('録音を停止しました。', 'assertive');
   };
+  stopRecordingRef.current = stopRecording;
 
   const saveToLegacyStorage = (record) => {
     const existing = JSON.parse(localStorage.getItem(LEGACY_RECORDINGS_KEY) || '[]');
@@ -332,11 +442,11 @@ const SoundCollection = () => {
 
   const saveRecording = async (name, tags) => {
     const target = currentRecording;
-    if (!target || !target.url || !name.trim() || isSaving) return;
+    if (!target || !target.audioBlob || !name.trim() || isSaving) return;
 
     setIsSaving(true);
     savingUrlRef.current = target.url;
-    clearError();
+    setSaveError('');
     try {
       const record = {
         name: name.trim(),
@@ -344,6 +454,7 @@ const SoundCollection = () => {
         audioData: await blobToAudioDataUrl(target.audioBlob),
         createdAt: target.createdAt || new Date().toISOString()
       };
+      if (target.duration > 0) record.duration = target.duration;
 
       let id;
       try {
@@ -358,25 +469,39 @@ const SoundCollection = () => {
 
       // 保存が確定してから一覧に出す（保存できていないのに保存済みに見えるのを防ぐ）
       requestPersistentStorage();
-      savedUrlsRef.current.add(target.url);
-      if (!isMountedRef.current) return;
-      setRecordings(prev => [...prev, { ...record, id, url: target.url }]);
-      // 保存中に次の録音が始まって編集中の音が変わっていたら、そちらは残す
-      setCurrentRecording(prev => (prev && prev.url === target.url ? null : prev));
+      savingUrlRef.current = null;
+      if (!isMountedRef.current) {
+        releaseObjectUrl(target.url);
+        return;
+      }
+      setRecentSounds(prev => [{ ...record, id }, ...prev].slice(0, RECENT_LIMIT));
+      setLibraryTags(prev => [...new Set([...prev, ...record.tags])]);
+      // 一覧の音は保存した音声データで再生するので、編集画面の URL は解放する
+      setCurrentRecording(prev => {
+        if (prev && prev.url === target.url) {
+          releaseObjectUrl(target.url);
+          return null;
+        }
+        return prev;
+      });
       setIsDraftRestored(false);
-      announce(`「${record.name}」を保存しました。`, 'polite');
+      preview.stop();
+      // お知らせ欄（role="status"）が読み上げるので、announce() では重ねて読ませない
+      setNotice(`「${record.name}」を保存しました。`);
     } catch (error) {
       console.error('録音の保存に失敗しました:', error);
+      savingUrlRef.current = null;
       if (!isMountedRef.current) {
         // 保存中にほかのページへ移動して保存に失敗した: 戻ってきたときにもう一度保存できるようにする
         keepUnsavedDraft({ audioBlob: target.audioBlob, name: name.trim(), tags, createdAt: target.createdAt });
         return;
       }
-      reportError(isQuotaExceededError(error)
+      const message = isQuotaExceededError(error)
         ? '保存できる容量が足りません。音ライブラリで使わない音を削除してから、もう一度保存してください。'
-        : '録音の保存に失敗しました。もう一度「保存」を押してください。');
+        : '録音の保存に失敗しました。もう一度「保存する」を押してください。';
+      setSaveError(message);
+      announce(message, 'assertive');
     } finally {
-      savingUrlRef.current = null;
       if (isMountedRef.current) setIsSaving(false);
     }
   };
@@ -394,6 +519,7 @@ const SoundCollection = () => {
     }
     if (!confirmDiscardUnsaved()) return;
     clearError();
+    setNotice('');
 
     let blob = file;
     try {
@@ -413,171 +539,241 @@ const SoundCollection = () => {
     });
   };
 
-  // 音声レベル監視関数
+  const openFilePicker = () => {
+    if (fileInputRef.current) fileInputRef.current.click();
+  };
+
+  // 「この音をすてる」（保存していない音は戻せないので確認する）
+  const throwAwayRecording = () => {
+    if (!window.confirm(THROW_AWAY_CONFIRM_MESSAGE)) return;
+    replaceCurrentRecording(null);
+    setNotice('音をすてました。');
+  };
+
+  const tagSuggestions = useMemo(
+    () => [...new Set([...libraryTags, ...DEFAULT_TAG_SUGGESTIONS])].slice(0, 12),
+    [libraryTags]
+  );
+
+  const remainingSeconds = Math.max(0, MAX_RECORDING_SECONDS - elapsedSeconds);
+
   return (
-    <div className="sound-collection">
-      <header>
+    <div className="sound-collection page-container">
+      <header className="page-header">
         <h2 id="page-title">
-          <Icon icon={Mic} label="マイク" /> 音あつめページ
+          <Icon icon={Mic} /> 音あつめ
         </h2>
         <p className="page-description">
-          身の回りにある音を録音したり、音ファイルをアップロードして音素材を集めましょう！
+          身の回りにある音を録音したり、音ファイルを選んだりして、音素材を集めましょう。
         </p>
       </header>
-      
+
       {/* アクセシビリティ用のライブリージョン */}
       <AnnouncementRegion />
-      <ErrorRegion />
-      
-      <section className="collection-actions" aria-labelledby="collection-title">
-        <h3 id="collection-title" className="sr-only">音の収集方法</h3>
-        
-        <section className="recording-section card" aria-labelledby="recording-title">
-          <h3 id="recording-title">
-            <Icon icon={Mic} label="マイク" /> 音を録音する
-          </h3>
-          
-          {/* iOS用の説明 */}
-          <div className="ios-notice" role="region" aria-labelledby="ios-instructions">
-            <h4 id="ios-instructions" className="sr-only">iPhone/iPad使用時の注意事項</h4>
-            <p>
-              <Icon icon={TabletSmartphone} label="スマートフォン" /> 
-              <strong>iPhone/iPadをお使いの方へ：</strong>
-            </p>
-            <p>録音ボタンを押すとマイクの使用許可を求めるダイアログが表示されます。「許可」を選択してください。</p>
-            <p>ダイアログが表示されない場合は、「設定」アプリ →「Safari」→「マイク」を「確認」か「許可」にしてください。</p>
-          </div>
-          
-          <div className="recording-controls" role="group" aria-labelledby="recording-controls-label">
-            <h4 id="recording-controls-label" className="sr-only">録音操作</h4>
-            {!isRecording ? (
-              <button 
-                ref={recordButtonRef}
-                className="accessible-button button-primary large-button record-btn"
-                onClick={startRecording}
-                aria-describedby="record-instructions"
-                type="button"
-                disabled={isSaving}
-              >
-                <Icon icon={Circle} label="録音開始" fill="currentColor" /> 録音開始
-              </button>
-            ) : (
-              <button 
-                className="accessible-button button-secondary large-button stop-btn"
-                onClick={stopRecording}
-                aria-describedby="stop-instructions"
-                type="button"
-              >
-                <Icon icon={Square} label="停止" fill="currentColor" /> 録音停止
-              </button>
-            )}
-            <div id="record-instructions" className="sr-only">
-              録音開始ボタンを押すとマイクが有効になり、音声の録音が始まります
-            </div>
-            <div id="stop-instructions" className="sr-only">
-              録音停止ボタンを押すと録音が終了し、音に名前をつけることができます
-            </div>
-          </div>
 
-          {isRecording && (
-            <div 
-              className="recording-status" 
-              role="status" 
-              aria-live="polite"
-              aria-label="録音状況"
-            >
-              <div className="recording-indicator">
-                <div className="pulse-dot" aria-hidden="true"></div>
-                録音中...
-              </div>
-            </div>
-          )}
-        </section>
+      <div className="collection-notice-region" role="status" aria-live="polite">
+        {notice && <p className="notice notice-success collection-notice">{notice}</p>}
+      </div>
 
-        <section className="upload-section card" aria-labelledby="upload-title">
-          <h3 id="upload-title">
-            <Icon icon={FolderOpen} label="フォルダ" /> 音ファイルをアップロード
-          </h3>
-          <button 
-            className="accessible-button button-secondary large-button"
-            onClick={() => fileInputRef.current?.click()}
-            aria-describedby="upload-instructions"
-            type="button"
-            disabled={isSaving}
-          >
-            <Icon icon={FileAudio} label="ファイル選択" /> ファイルを選択
-          </button>
-          <div id="upload-instructions" className="sr-only">
-            音声ファイルを選択してアップロードできます。対応形式: MP3, WAV, M4A など
-          </div>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="audio/*"
-            onChange={handleFileUpload}
-            style={{ display: 'none' }}
-            aria-label="音声ファイルを選択"
-          />
-        </section>
-      </section>
-
-      {currentRecording && (
-        <RecordingEditor 
-          key={currentRecording.url}
+      {currentRecording ? (
+        <RecordingEditor
+          key={currentRecording.url || 'restoring'}
           isDraftRestored={isDraftRestored}
           onFieldsChange={(fields) => { editorFieldsRef.current = fields; }}
           recording={currentRecording}
           onSave={saveRecording}
-          onCancel={() => replaceCurrentRecording(null)}
+          onThrowAway={throwAwayRecording}
+          onRecordAgain={startRecording}
           isSaving={isSaving}
+          saveError={saveError}
+          tagSuggestions={tagSuggestions}
+          isPlaying={preview.playingId === 'editor'}
+          onTogglePlay={() => preview.toggle('editor', currentRecording.url)}
         />
+      ) : (
+        <section className="collection-actions" aria-labelledby="collection-title">
+          <h3 id="collection-title" className="sr-only">音の集め方</h3>
+
+          <section className={`recording-section card ${isRecording ? 'is-recording' : ''}`} aria-labelledby="recording-title">
+            <h3 id="recording-title">
+              <Icon icon={Mic} /> 音を録音する
+            </h3>
+
+            <div className="recording-controls" role="group" aria-labelledby="recording-controls-label">
+              <h4 id="recording-controls-label" className="sr-only">録音操作</h4>
+              {!isRecording ? (
+                <button
+                  className="record-btn"
+                  onClick={startRecording}
+                  aria-describedby="record-instructions"
+                  type="button"
+                  disabled={isSaving}
+                >
+                  <span className="record-btn-circle" aria-hidden="true"><Icon icon={Mic} size={44} /></span>
+                  <span className="record-btn-label">録音開始</span>
+                </button>
+              ) : (
+                <button
+                  className="record-btn stop"
+                  onClick={stopRecording}
+                  aria-describedby="stop-instructions"
+                  type="button"
+                >
+                  <span className="record-btn-circle" aria-hidden="true"><Icon icon={Square} size={40} fill="currentColor" /></span>
+                  <span className="record-btn-label">録音停止</span>
+                </button>
+              )}
+              <p id="record-instructions" className="recording-hint">
+                ボタンを押すと録音が始まります（{MAX_RECORDING_SECONDS}秒まで）
+              </p>
+              <p id="stop-instructions" className="sr-only">
+                録音停止ボタンを押すと録音が終了し、音に名前をつけることができます
+              </p>
+            </div>
+
+            {isRecording && (
+              <div className="recording-status" role="status" aria-label="録音状況">
+                <div className="recording-indicator">
+                  <span className="pulse-dot" aria-hidden="true"></span>
+                  録音中...
+                </div>
+                <div className="recording-time" aria-hidden="true">
+                  <span className="recording-elapsed">{formatSeconds(elapsedSeconds)}</span>
+                  <span className="recording-limit"> / {formatSeconds(MAX_RECORDING_SECONDS)}</span>
+                </div>
+                <div className="recording-progress" aria-hidden="true">
+                  <span style={{ width: `${Math.min(100, (elapsedSeconds / MAX_RECORDING_SECONDS) * 100)}%` }} />
+                </div>
+                {remainingSeconds <= 10 && (
+                  <p className="recording-warning">あと {Math.ceil(remainingSeconds)} 秒で止まります</p>
+                )}
+              </div>
+            )}
+
+            {/* 録音のエラーはボタンの近くに出す */}
+            <ErrorRegion />
+            {micDenied && (
+              <button type="button" className="button-secondary reload-btn" onClick={() => window.location.reload()}>
+                <Icon icon={RefreshCw} /> ページを読み込み直す
+              </button>
+            )}
+
+            <details className="mic-help" open={showMicHelp} onToggle={(event) => setShowMicHelp(event.currentTarget.open)}>
+              <summary>マイクが使えないとき</summary>
+              <div className="mic-help-body" role="region" aria-labelledby="ios-instructions">
+                <h4 id="ios-instructions">iPhone/iPadをお使いの方へ：</h4>
+                <ul>
+                  <li>録音ボタンを押すと、マイクを使ってよいか聞かれます。「許可」を選んでください。</li>
+                  <li>聞かれないときは、「設定」アプリ →「Safari」→「マイク」を「確認」か「許可」にしてください。</li>
+                  <li>「許可しない」を選んだあとは、ページを読み込み直してから、もう一度録音ボタンを押してください。</li>
+                </ul>
+              </div>
+            </details>
+          </section>
+
+          <section className="upload-section card" aria-labelledby="upload-title">
+            <h3 id="upload-title">
+              <Icon icon={FolderOpen} /> 音ファイルをアップロード
+            </h3>
+            <p className="upload-description">iPad の「ファイル」アプリやパソコンにある音を使えます。</p>
+            <button
+              className="button-secondary button-large upload-btn"
+              onClick={openFilePicker}
+              aria-describedby="upload-instructions"
+              type="button"
+              disabled={isSaving || isRecording}
+            >
+              <Icon icon={FolderOpen} /> ファイルを選択
+            </button>
+            <p id="upload-instructions" className="field-help">
+              対応形式: MP3, WAV, M4A など
+            </p>
+          </section>
+        </section>
       )}
 
+      {/* ファイル選択の入力欄は、編集中もページに置いておく（選び直したときの確認のため） */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="audio/*"
+        onChange={handleFileUpload}
+        className="collection-file-input"
+        tabIndex={-1}
+        aria-label="音声ファイルを選択"
+      />
+
       <section className="recent-recordings" aria-labelledby="recent-title">
-        <h3 id="recent-title">
-          <Icon icon={ListMusic} label="メモ" /> 最近録音した音
-        </h3>
-        {recordings.length === 0 ? (
-          <p className="no-recordings">まだ録音した音がありません。上の録音ボタンから始めましょう！</p>
+        <div className="recent-header">
+          <h3 id="recent-title">
+            <Icon icon={ListMusic} /> さいきん集めた音
+          </h3>
+          {recentSounds.length > 0 && (
+            <a href="#/library" className="recent-library-link">音ライブラリですべて見る</a>
+          )}
+        </div>
+        {recentSounds.length === 0 ? (
+          <p className="no-recordings empty-state">まだ録音した音がありません。上の録音ボタンから始めましょう！</p>
         ) : (
-          <div 
-            className="recordings-grid" 
-            role="grid" 
-            aria-label="録音された音のリスト"
-          >
-            {recordings.map((recording, index) => (
-              <SoundCard 
-                key={recording.id} 
-                recording={recording} 
-                index={index}
+          <ul className="recordings-grid">
+            {recentSounds.map((recording) => (
+              <SoundCard
+                key={recording.id}
+                recording={recording}
+                isPlaying={preview.playingId === recording.id}
+                onTogglePlay={() => preview.toggle(recording.id, recording.audioData)}
               />
             ))}
-          </div>
+          </ul>
         )}
       </section>
     </div>
   );
 };
 
-const RecordingEditor = ({ recording, onSave, onCancel, onFieldsChange, isSaving = false, isDraftRestored = false }) => {
+const RecordingEditor = ({
+  recording,
+  onSave,
+  onThrowAway,
+  onRecordAgain,
+  onFieldsChange,
+  isSaving = false,
+  saveError = '',
+  isDraftRestored = false,
+  tagSuggestions = [],
+  isPlaying = false,
+  onTogglePlay
+}) => {
   const [name, setName] = useState(recording.name);
   const [tagInput, setTagInput] = useState('');
   const [tags, setTags] = useState(recording.tags);
   const [validationMessage, setValidationMessage] = useState('');
+  const headingRef = useRef(null);
+  const editorRef = useRef(null);
+
+  // 録音が終わったら、編集画面を見える所に出して読み上げにも知らせる
+  useEffect(() => {
+    if (editorRef.current && editorRef.current.scrollIntoView) {
+      editorRef.current.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    }
+    if (headingRef.current) headingRef.current.focus();
+  }, []);
 
   // 入力途中の名前・タグを親に伝える（ページを離れても戻ったときに続きから書けるように）
   useEffect(() => {
     if (onFieldsChange) onFieldsChange({ name, tags });
   }, [name, tags, onFieldsChange]);
 
-  const addTag = () => {
-    if (tagInput.trim() && !tags.includes(tagInput.trim())) {
-      setTags([...tags, tagInput.trim()]);
-      setTagInput('');
-      setValidationMessage(`タグ「${tagInput.trim()}」を追加しました`);
-    } else if (tags.includes(tagInput.trim())) {
+  const addTag = (value = tagInput) => {
+    const tag = value.trim();
+    if (!tag) return;
+    if (tags.includes(tag)) {
       setValidationMessage('このタグは既に追加されています');
+      return;
     }
+    setTags([...tags, tag]);
+    if (value === tagInput) setTagInput('');
+    setValidationMessage(`タグ「${tag}」を追加しました`);
   };
 
   const removeTag = (tagToRemove) => {
@@ -600,15 +796,18 @@ const RecordingEditor = ({ recording, onSave, onCancel, onFieldsChange, isSaving
     onSave(name, tags);
   };
 
+  const durationText = formatDuration(recording.duration);
+  const unusedSuggestions = tagSuggestions.filter((tag) => !tags.includes(tag));
+
   return (
-    <section 
-      className="recording-editor card" 
-      role="dialog" 
+    <section
+      ref={editorRef}
+      className="recording-editor card"
       aria-labelledby="editor-title"
       aria-describedby="editor-description"
     >
-      <h3 id="editor-title">
-        <Icon icon={Pencil} label="編集" /> 音に名前をつけよう
+      <h3 id="editor-title" ref={headingRef} tabIndex={-1}>
+        <Icon icon={Pencil} /> 音に名前をつけよう
       </h3>
       <p id="editor-description" className="sr-only">
         録音した音に名前とタグをつけて保存できます
@@ -618,107 +817,101 @@ const RecordingEditor = ({ recording, onSave, onCancel, onFieldsChange, isSaving
           前に録音した音がまだ保存されていません。名前をつけて保存してください。
         </p>
       )}
-      
+
       <div className="audio-preview-container">
-        <label htmlFor="audio-preview" className="audio-preview-label">録音した音のプレビュー:</label>
-        <audio 
-          id="audio-preview"
-          controls 
-          src={recording.url} 
-          className="accessible-audio audio-preview"
-          preload="auto"
-          playsInline
-          onError={(e) => {
-            console.error('音声プレビューの読み込みエラー:', e);
-          }}
-          aria-describedby="audio-preview-desc"
+        <button
+          type="button"
+          className={`preview-play-btn ${isPlaying ? 'playing' : ''}`}
+          onClick={onTogglePlay}
+          disabled={!recording.url}
+          aria-label={isPlaying ? '録音した音を止める' : '録音した音をきく'}
         >
-          <track kind="captions" label="音声説明" srcLang="ja" />
-          お使いのブラウザは音声再生に対応していません。
-        </audio>
-        <p id="audio-preview-desc" className="sr-only">
-          録音された音声を再生して確認できます
-        </p>
+          <Icon icon={isPlaying ? Square : Play} fill="currentColor" size={26} />
+          <span aria-hidden="true">{isPlaying ? 'とめる' : 'きく'}</span>
+        </button>
+        <span className="preview-duration">{durationText ? `長さ ${durationText}` : ''}</span>
       </div>
-      
+
       <div className="form-group">
-        <label htmlFor="soundName" className="required-label">
-          音の名前 <span aria-label="必須" className="required">*</span>:
+        <label htmlFor="soundName" className="field-label">
+          音の名前 <span className="required">（必須）</span>
         </label>
         <input
           id="soundName"
           type="text"
           value={name}
+          maxLength={50}
           onChange={(e) => {
             setName(e.target.value);
             if (validationMessage) setValidationMessage('');
           }}
           placeholder="例: ピアノの音、雨の音"
-          className="accessible-input sound-name-input"
+          className="text-field sound-name-input"
           required
+          enterKeyHint="done"
           aria-describedby="name-help"
           aria-invalid={!name.trim() && validationMessage ? 'true' : 'false'}
         />
-        <p id="name-help" className="help-text">
-          この音を表す分かりやすい名前をつけてください
+        <p id="name-help" className="field-help">
+          この音を表す分かりやすい名前をつけてください。名前を入れると保存できます。
         </p>
       </div>
 
       <div className="form-group">
-        <label htmlFor="soundTags" className="optional-label">
-          タグ <span className="optional">(任意)</span>:
+        <label htmlFor="soundTags" className="field-label">
+          タグ <span className="optional">（なくてもよい）</span>
         </label>
         <div className="tag-input-container">
           <input
             id="soundTags"
             type="text"
             value={tagInput}
+            maxLength={30}
             onChange={(e) => setTagInput(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="例: 楽器、自然"
-            className="accessible-input tag-input"
+            className="text-field tag-input"
+            enterKeyHint="enter"
             aria-describedby="tag-help"
-            list="tag-suggestions"
           />
-          <datalist id="tag-suggestions">
-            <option value="楽器">楽器</option>
-            <option value="自然">自然</option>
-            <option value="機械">機械</option>
-            <option value="動物">動物</option>
-            <option value="声">声</option>
-          </datalist>
-          <button 
-            onClick={addTag} 
-            className="accessible-button add-tag-btn"
+          <button
+            onClick={() => addTag()}
+            className="button-secondary add-tag-btn"
             type="button"
             disabled={!tagInput.trim()}
-            aria-describedby="add-tag-help"
           >
-            追加
+            <Icon icon={Plus} /> 追加
           </button>
         </div>
-        <p id="tag-help" className="help-text">
-          音の種類やカテゴリを表すタグを追加できます。Enterキーでも追加できます。
+        <p id="tag-help" className="field-help">
+          音の種類を表すことばです。下の候補を押しても追加できます。
         </p>
-        <p id="add-tag-help" className="sr-only">
-          入力したタグを音に追加します
-        </p>
-        
+
+        {unusedSuggestions.length > 0 && (
+          <div className="tag-suggestions" role="group" aria-label="タグの候補">
+            {unusedSuggestions.map((tag) => (
+              <button key={tag} type="button" className="chip chip-suggestion" onClick={() => addTag(tag)}>
+                <Icon icon={Plus} /> {tag}
+              </button>
+            ))}
+          </div>
+        )}
+
         {tags.length > 0 && (
           <div className="tags-display" role="group" aria-labelledby="tags-label">
             <p id="tags-label" className="tags-title">追加されたタグ:</p>
             <ul className="tags-list" aria-live="polite">
-              {tags.map((tag, index) => (
+              {tags.map((tag) => (
                 <li key={tag} className="tag-item">
                   <span className="tag">
                     {tag}
-                    <button 
-                      onClick={() => removeTag(tag)} 
-                      className="remove-tag touch-target-expand"
+                    <button
+                      onClick={() => removeTag(tag)}
+                      className="remove-tag"
                       type="button"
                       aria-label={`タグ「${tag}」を削除`}
                     >
-                      <Icon icon={X} size={14} />
+                      <Icon icon={X} size={16} />
                     </button>
                   </span>
                 </li>
@@ -729,107 +922,78 @@ const RecordingEditor = ({ recording, onSave, onCancel, onFieldsChange, isSaving
       </div>
 
       {validationMessage && (
-        <div 
-          className="validation-message" 
-          role="status" 
-          aria-live="polite"
-        >
+        <div className="validation-message" role="status" aria-live="polite">
           {validationMessage}
         </div>
       )}
 
+      {/* 保存のエラーは保存ボタンの近くに出す（以前はページの上に出て見えなかった） */}
+      {saveError && <div className="error-message" role="alert">{saveError}</div>}
+
       <div className="editor-actions" role="group" aria-labelledby="actions-label">
-        <p id="actions-label" className="sr-only">保存・キャンセル操作</p>
-        <button 
+        <p id="actions-label" className="sr-only">保存・録り直し・すてる操作</p>
+        <button
           onClick={handleSave}
-          className="accessible-button button-primary"
+          className="button-primary button-large save-btn"
           disabled={!name.trim() || isSaving}
           type="button"
-          aria-describedby="save-help"
         >
-          <Icon icon={Save} label="保存" /> {isSaving ? '保存中...' : '保存'}
+          <Icon icon={Save} /> {isSaving ? '保存中...' : '保存する'}
         </button>
-        <button 
-          onClick={onCancel} 
-          className="accessible-button button-secondary"
+        <button
+          onClick={onRecordAgain}
+          className="button-secondary"
           type="button"
           disabled={isSaving}
-          aria-describedby="cancel-help"
         >
-          <Icon icon={X} label="キャンセル" /> キャンセル
+          <Icon icon={Mic} /> 録音しなおす
         </button>
-        <p id="save-help" className="sr-only">
-          音の名前とタグを保存します
-        </p>
-        <p id="cancel-help" className="sr-only">
-          編集をキャンセルして録音を破棄します
-        </p>
+        <button
+          onClick={onThrowAway}
+          className="button-danger"
+          type="button"
+          disabled={isSaving}
+        >
+          <Icon icon={Trash2} /> この音をすてる
+        </button>
       </div>
     </section>
   );
 };
 
-
-const SoundCard = ({ recording, index }) => {
-  const formattedDate = new Date(recording.createdAt).toLocaleDateString('ja-JP', {
-    year: 'numeric',
+const SoundCard = ({ recording, isPlaying, onTogglePlay }) => {
+  const date = new Date(recording.createdAt);
+  const formattedDate = isNaN(date.getTime()) ? '' : date.toLocaleDateString('ja-JP', {
     month: 'long',
     day: 'numeric'
   });
+  const durationText = formatDuration(recording.duration);
 
   return (
-    <article 
-      className="sound-card" 
-      aria-labelledby={`sound-title-${recording.id}`}
-      aria-describedby={`sound-desc-${recording.id}`}
-    >
-      <header className="sound-info">
-        <h4 id={`sound-title-${recording.id}`} className="sound-name">
-          {recording.name}
-        </h4>
-        <p className="sound-date" aria-label={`録音日: ${formattedDate}`}>
+    <li className="sound-card">
+      <button
+        type="button"
+        className={`sound-card-play ${isPlaying ? 'playing' : ''}`}
+        onClick={onTogglePlay}
+        aria-label={isPlaying ? `${recording.name}を止める` : `${recording.name}をきく`}
+      >
+        <Icon icon={isPlaying ? Square : Play} fill="currentColor" size={22} />
+      </button>
+      <div className="sound-info">
+        <h4 className="sound-name">{recording.name}</h4>
+        <p className="sound-date">
           {formattedDate}
+          {durationText && <span className="sound-card-duration">{durationText}</span>}
         </p>
         {(recording.tags || []).length > 0 && (
-          <div className="sound-tags" role="group" aria-label="タグ">
-            {recording.tags.map((tag, tagIndex) => (
-              <span 
-                key={tag} 
-                className="tag small"
-                role="mark"
-                aria-label={`タグ: ${tag}`}
-              >
-                {tag}
-              </span>
+          <ul className="sound-tags" aria-label="タグ">
+            {recording.tags.map((tag) => (
+              <li key={tag} className="tag-label">{tag}</li>
             ))}
-          </div>
+          </ul>
         )}
-      </header>
-      
-      <div className="sound-player">
-        <label htmlFor={`audio-${recording.id}`} className="sr-only">
-          {recording.name}の音声プレーヤー
-        </label>
-        <audio 
-          id={`audio-${recording.id}`}
-          controls 
-          src={recording.url}
-          className="accessible-audio"
-          preload="auto"
-          playsInline
-          onError={(e) => {
-            console.error('音声カードの読み込みエラー:', e, 'recording:', recording.name);
-          }}
-          aria-describedby={`audio-desc-${recording.id}`}
-        >
-          <track kind="captions" label="音声説明" srcLang="ja" />
-          お使いのブラウザは音声再生に対応していません。
-        </audio>
-        <p id={`audio-desc-${recording.id}`} className="sr-only">
-          {recording.name}の音声ファイル。再生ボタンで音を聞くことができます。
-        </p>
       </div>
-    </article>
+    </li>
   );
 };
 

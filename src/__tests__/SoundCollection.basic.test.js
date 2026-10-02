@@ -8,7 +8,7 @@ describe('SoundCollection Component - Basic Tests', () => {
     render(<SoundCollection />);
     
     // ページタイトルが表示される
-    expect(screen.getByText(/音あつめページ/)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2, name: '音あつめ' })).toBeInTheDocument();
   });
 
   test('has recording functionality', () => {

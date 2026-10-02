@@ -30,7 +30,7 @@ describe('SoundCollection Component', () => {
 
   test('renders sound collection interface', () => {
     render(<SoundCollection />);
-    expect(screen.getByRole('heading', { level: 2, name: /音あつめページ/ })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2, name: '音あつめ' })).toBeInTheDocument();
     expect(screen.getByText(/身の回りにある音を録音したり/)).toBeInTheDocument();
   });
 
@@ -75,14 +75,20 @@ describe('SoundCollection Component', () => {
     fireEvent.change(screen.getByLabelText('音声ファイルを選択'), {
       target: { files: [new File([makeAudioBytes('wav', 20)], 'かえるの声.wav', { type: 'audio/wav' })] }
     });
-    expect(await screen.findByRole('dialog', { name: /音に名前をつけよう/ })).toBeInTheDocument();
+    // 名前をつける画面はダイアログではなく、録音ボタンの場所に出るふつうの区切り（以前は role="dialog" だった）
+    expect(await screen.findByRole('region', { name: /音に名前をつけよう/ })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(screen.getByLabelText(/音の名前/)).toHaveValue('かえるの声');
   });
 
   test('displays recording instructions', () => {
     render(<SoundCollection />);
+    // iPad のマイクの設定は「マイクが使えないとき」を開くと出る（いつも出ていると録音ボタンが下に押し出されていた）
+    const help = screen.getByText('マイクが使えないとき').closest('details');
+    expect(help).not.toHaveAttribute('open');
     expect(screen.getByText('iPhone/iPadをお使いの方へ：')).toBeInTheDocument();
     expect(screen.getByText(/「設定」アプリ →「Safari」→「マイク」/)).toBeInTheDocument();
+    expect(screen.getByText(/60秒まで/)).toBeInTheDocument();
   });
 
   test('handles component cleanup on unmount', () => {
@@ -92,7 +98,7 @@ describe('SoundCollection Component', () => {
 
   test('has proper ARIA live regions', () => {
     render(<SoundCollection />);
-    expect(screen.getByRole('alert')).toBeInTheDocument(); // エラー表示用（空のときは非表示）
+    expect(screen.getByRole('alert', { hidden: true })).toBeInTheDocument(); // エラー表示用（空のときは非表示）
     expect(document.querySelector('[aria-live="polite"]')).toBeInTheDocument(); // お知らせ用
   });
 

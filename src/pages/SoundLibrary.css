@@ -71,7 +71,14 @@
   font-size: 15px;
 }
 
-.sound-library .library-error button {
+.sound-library .library-card-error {
+  justify-content: space-between;
+  margin: 0;
+  font-size: 15px;
+}
+
+.sound-library .library-error button,
+.sound-library .library-card-error button {
   display: inline-flex;
   align-items: center;
   justify-content: center;

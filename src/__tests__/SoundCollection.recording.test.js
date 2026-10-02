@@ -4,7 +4,7 @@ import SoundCollection, { MAX_RECORDING_SECONDS } from '../pages/SoundCollection
 import { addRecording, getAllRecordings } from '../utils/indexedDB';
 import { installFakeIndexedDB } from '../test-utils/fakeIndexedDB';
 import { installMemoryLocalStorage } from '../test-utils/storage';
-import { TestFileReader, makeAudioBytes } from '../test-utils/audioFixtures';
+import { TestFileReader, makeAudioBytes, makeDataUrl } from '../test-utils/audioFixtures';
 import { hasUnsavedDraft, takeUnsavedDraft } from '../utils/unsavedDraft';
 
 let idb;
@@ -234,7 +234,8 @@ describe('録音と保存', () => {
     fireEvent.change(screen.getByLabelText(/音の名前/), { target: { value: '大きな音' } });
     fireEvent.click(screen.getByRole('button', { name: /保存する/ }));
     const editor = screen.getByRole('region', { name: /音に名前をつけよう/ });
-    expect(await within(editor).findByRole('alert')).toHaveTextContent('容量が足りません');
+    // 編集画面には「録音しなおす」のエラーの場所（空のときは見えない）もあるので、文字で探す
+    expect(await within(editor).findByText(/容量が足りません/)).toHaveAttribute('role', 'alert');
     expect(screen.getByLabelText(/音の名前/)).toBeInTheDocument();
     expect(screen.queryByText('大きな音', { selector: 'h4' })).not.toBeInTheDocument();
   });
@@ -498,5 +499,78 @@ describe('保存に IndexedDB が使えない環境', () => {
     fireEvent.click(screen.getByRole('button', { name: /保存する/ }));
     expect(await within(recentList()).findByText('予備保存')).toBeInTheDocument();
     expect(window.localStorage.setItem).toHaveBeenCalledWith('soundRecordings', expect.stringContaining('予備保存'));
+  });
+});
+
+describe('レビューで見つかった不具合（エラー・読み上げ・フォーカス）', () => {
+  test('「録音しなおす」でマイクが使えなかったら、編集画面の中で知らせ、読み込み直すボタンを出す', async () => {
+    render(<SoundCollection />);
+    await record();
+    navigator.mediaDevices.getUserMedia.mockImplementation(() => Promise.reject(Object.assign(new Error('denied'), { name: 'NotAllowedError' })));
+    fireEvent.click(screen.getByRole('button', { name: /録音しなおす/ }));
+    const editor = screen.getByRole('region', { name: /音に名前をつけよう/ });
+    // 以前はエラーの場所が編集画面の外（表示されていない所）にあり、画面に何も出なかった
+    await waitFor(() => expect(within(editor).getAllByRole('alert').some((alert) => alert.textContent.trim() !== '')).toBe(true));
+    expect(await within(editor).findByRole('button', { name: /ページを読み込み直す/ })).toBeInTheDocument();
+    expect(screen.getByLabelText(/音の名前/)).toBeInTheDocument(); // 前に録った音は残っている
+  });
+
+  test('エラーは 1 回だけ読み上げる（エラーの場所と読み上げ用の場所の両方には書かない）', async () => {
+    navigator.mediaDevices.getUserMedia.mockImplementation(() => Promise.reject(Object.assign(new Error('busy'), { name: 'NotReadableError' })));
+    render(<SoundCollection />);
+    fireEvent.click(screen.getByRole('button', { name: /録音開始/ }));
+    const alert = document.querySelector('.recording-section [role="alert"]');
+    await waitFor(() => expect(alert.textContent).not.toBe(''));
+    Array.from(document.querySelectorAll('[aria-live]'))
+      .filter((element) => element.getAttribute('role') !== 'alert')
+      .forEach((element) => expect(element.textContent).not.toContain(alert.textContent));
+  });
+
+  test('録音中は読み上げない（残り秒数などの読み上げの声が、録音に入らないように）', async () => {
+    render(<SoundCollection />);
+    fireEvent.click(screen.getByRole('button', { name: /録音開始/ }));
+    await screen.findByRole('button', { name: /録音停止/ });
+    const status = document.querySelector('.recording-status');
+    expect(status).toHaveAttribute('aria-hidden', 'true');
+    expect(status).not.toHaveAttribute('role');
+    expect(document.body.textContent).not.toContain('録音を開始しました');
+  });
+
+  test('保存・すてる・録音しなおすのあとは、録音ボタンにフォーカスが移る（ページの先頭に戻らない）', async () => {
+    render(<SoundCollection />);
+    await record();
+    await saveWithName('ひとつめ');
+    await waitFor(() => expect(screen.getByRole('button', { name: /録音開始/ })).toHaveFocus());
+    await record();
+    fireEvent.click(screen.getByRole('button', { name: /この音をすてる/ }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /録音開始/ })).toHaveFocus());
+    await record();
+    fireEvent.click(screen.getByRole('button', { name: /録音しなおす/ }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /録音停止/ })).toHaveFocus());
+  });
+
+  test('タグの候補や × を押したあとは、タグの入力欄にフォーカスが移る', async () => {
+    render(<SoundCollection />);
+    await record();
+    const suggestions = screen.getByRole('group', { name: 'タグの候補' });
+    fireEvent.click(within(suggestions).getAllByRole('button')[0]);
+    const tagInput = screen.getByRole('textbox', { name: /タグ/ });
+    expect(tagInput).toHaveFocus();
+    fireEvent.click(screen.getAllByRole('button', { name: /タグ「.*」を削除/ })[0]);
+    expect(tagInput).toHaveFocus();
+  });
+
+  test('以前の版が Date のまま保存した音が、「さいきん集めた音」に居座らない', async () => {
+    // 2025 年 10 月の版と同じく、作成日時を Date のまま書き込む（addRecording は文字列に直すので使わない）
+    idb.seed('SoundLibraryDB', 'recordings', Array.from({ length: 6 }, (_, i) => ({
+      name: `去年の音${i}`, tags: [], audioData: makeDataUrl('wav', 'audio/wav'), createdAt: new Date(Date.UTC(2025, 9, 16, i))
+    })), { autoIncrement: true });
+    idb.seed('SoundLibraryDB', 'songs', []);
+    await addRecording({ name: '今年の音', tags: [], audioData: makeDataUrl('wav', 'audio/wav'), createdAt: '2026-04-01T00:00:00.000Z' });
+    render(<SoundCollection />);
+    await waitFor(() => expect(within(recentList()).getAllByRole('heading', { level: 4 })).toHaveLength(6));
+    const names = within(recentList()).getAllByRole('heading', { level: 4 }).map((heading) => heading.textContent);
+    expect(names[0]).toBe('今年の音');
+    expect(names).not.toContain('去年の音0');
   });
 });

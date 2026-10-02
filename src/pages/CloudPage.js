@@ -42,7 +42,7 @@ import {
   getUserIdentifier,
   saveStudentProfile
 } from '../utils/api';
-import { formatDateJa } from '../utils/date';
+import { compareByNewest, formatDateJa } from '../utils/date';
 import { focusNextFieldOnEnter, isEnterKey } from '../utils/keyboard';
 import { matchesSearch, toHalfWidth, toTagList, toText } from '../utils/text';
 import { formatDuration } from '../utils/timing';
@@ -95,7 +95,7 @@ const normalizeSharedFiles = (list) => (Array.isArray(list) ? list : [])
     uploadDate: formatDateJa(file.upload_date)
   }));
 
-const byNewest = (a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''));
+const byNewest = compareByNewest;
 
 // preview: 「きく」ボタンの試し聞き。ダウンロード数（もらった人の数）に数えない
 const buildDownloadUrl = (file, { preview = false } = {}) => {

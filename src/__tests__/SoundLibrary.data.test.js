@@ -273,3 +273,63 @@ test('長さが保存されていない以前の音は、1 つずつ長さを調
   expect(decodeCount).toBe(1); // 長さが分かっている音は調べない
   expect((await db.getAllRecordings()).find((r) => r.name === '前の音').duration).toBe(1.5);
 });
+
+describe('レビューで見つかった不具合', () => {
+  test('以前の版が Date のまま保存した音も、日時の順に並び、日付を表示する', async () => {
+    const lastYear = new Date(Date.UTC(2025, 9, 16));
+    // 2025 年 10 月の版と同じく、作成日時を Date のまま書き込む（addRecording は文字列に直すので使わない）
+    idb.seed('SoundLibraryDB', 'recordings', [
+      { name: '去年の音', tags: [], audioData: makeDataUrl('wav', 'audio/wav'), createdAt: lastYear }
+    ], { autoIncrement: true });
+    idb.seed('SoundLibraryDB', 'songs', []);
+    await seed();
+    await renderLibrary();
+    // 以前は文字にした「Thu Oct 16 2025 …」で比べていて、去年の音がいちばん新しい扱いになった
+    expect(cardNames()).toEqual(['鳥の声', '雨の音', 'たいこ', '去年の音']);
+    fireEvent.change(screen.getByRole('combobox', { name: 'ならべかた' }), { target: { value: 'oldest' } });
+    expect(cardNames()[0]).toBe('去年の音');
+    expect(within(cardFor('去年の音')).getByText(lastYear.toLocaleDateString('ja-JP'))).toBeInTheDocument();
+  });
+
+  test('以前に保存された「 楽器 」や数字のタグも × で消せる', async () => {
+    await db.addRecording({ name: '古いタグの音', tags: [' 楽器 ', 1], audioData: makeDataUrl('wav', 'audio/wav') });
+    await renderLibrary();
+    fireEvent.click(within(cardFor('古いタグの音')).getByTitle('タグを編集'));
+    fireEvent.click(within(cardFor('古いタグの音')).getByRole('button', { name: 'タグ「1」を削除' }));
+    await waitFor(() => expect(within(cardFor('古いタグの音')).queryByRole('button', { name: 'タグ「1」を削除' })).not.toBeInTheDocument());
+    expect(within(cardFor('古いタグの音')).getByText('楽器')).toBeInTheDocument();
+  });
+
+  test('失敗したときは、その音のカードの中で知らせる（下の方のカードでも見える）', async () => {
+    await seed();
+    await renderLibrary();
+    idb.failNextCommit(new Error('write failed'), (tx) => tx.mode === 'readwrite');
+    fireEvent.click(within(confirmDelete('たいこ')).getByRole('button', { name: /削除する/ }));
+    const alert = await within(cardFor('たいこ')).findByRole('alert');
+    expect(alert).toHaveTextContent('音素材の削除に失敗しました。');
+    fireEvent.click(within(alert).getByRole('button', { name: 'メッセージを閉じる' }));
+    expect(within(cardFor('たいこ')).queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  test('削除したあとは、となりの音の ▶ にフォーカスが移る（最後の 1 つなら「音あつめへ」）', async () => {
+    await seed();
+    await renderLibrary(); // 新しい順: 鳥の声, 雨の音, たいこ
+    fireEvent.click(within(confirmDelete('雨の音')).getByRole('button', { name: /削除する/ }));
+    await waitFor(() => expect(cardNames()).toEqual(['鳥の声', 'たいこ']));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'たいこをきく' })).toHaveFocus());
+  });
+
+  test('「フィルターをクリア」を押したら検索欄に、タグの編集を開いたら入力欄にフォーカスが移る', async () => {
+    await seed();
+    await renderLibrary();
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'たい' } });
+    fireEvent.click(screen.getByRole('button', { name: /フィルターをクリア/ }));
+    expect(screen.getByRole('searchbox')).toHaveFocus();
+    fireEvent.click(within(cardFor('たいこ')).getByTitle('タグを編集'));
+    const input = within(cardFor('たいこ')).getByPlaceholderText('新しいタグを入力...');
+    expect(input).toHaveFocus();
+    const suggestions = within(cardFor('たいこ')).getByRole('group', { name: 'ほかの音に付いているタグ' });
+    fireEvent.click(within(suggestions).getAllByRole('button')[0]);
+    expect(input).toHaveFocus();
+  });
+});

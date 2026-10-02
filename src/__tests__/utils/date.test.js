@@ -1,4 +1,4 @@
-import { formatDateJa, parseServerDate } from '../../utils/date';
+import { compareByNewest, formatDateJa, parseServerDate, toIsoDateString, toTimestamp } from '../../utils/date';
 
 describe('parseServerDate', () => {
   test('MySQL の「日付 時刻」をこの端末の時刻として読む（Safari は空白区切りを読めない）', () => {
@@ -45,5 +45,32 @@ describe('formatDateJa', () => {
     expect(formatDateJa('2026-05-01 10:00:00')).toBe(new Date(2026, 4, 1).toLocaleDateString('ja-JP'));
     expect(formatDateJa('壊れた値')).toBe('');
     expect(formatDateJa(undefined)).toBe('');
+  });
+});
+
+describe('並べ替え用の時刻（以前の版が Date のまま保存した作成日時も）', () => {
+  test('文字列・Date・数値の時刻を比べられ、読めない値は 0', () => {
+    expect(toTimestamp('2026-04-01T00:00:00Z')).toBe(Date.UTC(2026, 3, 1));
+    expect(toTimestamp(new Date(Date.UTC(2025, 9, 16)))).toBe(Date.UTC(2025, 9, 16));
+    expect(toTimestamp(Date.UTC(2025, 0, 1))).toBe(Date.UTC(2025, 0, 1));
+    expect(toTimestamp(undefined)).toBe(0);
+    expect(toTimestamp('こわれた値')).toBe(0);
+  });
+
+  test('新しい順: Date で保存された古い音が先頭に来ない', () => {
+    const sounds = [
+      { name: '2025 年の音（Date）', createdAt: new Date(Date.UTC(2025, 9, 16)) },
+      { name: '2026 年 4 月', createdAt: '2026-04-01T00:00:00.000Z' },
+      { name: '日時なし' },
+      { name: '2026 年 5 月', createdAt: '2026-05-01T00:00:00Z' }
+    ];
+    expect([...sounds].sort(compareByNewest).map((s) => s.name)).toEqual(['2026 年 5 月', '2026 年 4 月', '2025 年の音（Date）', '日時なし']);
+  });
+
+  test('ISO 形式の文字列にそろえる', () => {
+    expect(toIsoDateString(new Date(Date.UTC(2025, 9, 16)))).toBe('2025-10-16T00:00:00.000Z');
+    expect(toIsoDateString('2026-04-01T00:00:00Z')).toBe('2026-04-01T00:00:00Z');
+    expect(toIsoDateString(Date.UTC(2025, 0, 1))).toBe('2025-01-01T00:00:00.000Z');
+    expect(toIsoDateString(undefined)).toBeUndefined();
   });
 });

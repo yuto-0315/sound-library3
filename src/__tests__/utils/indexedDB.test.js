@@ -472,3 +472,23 @@ describe('requestPersistentStorage（データの自動削除を防ぐ）', () =
     await expect(requestPersistentStorage()).resolves.toBe(false);
   });
 });
+
+describe('以前の版が保存したデータ（レビューで発見）', () => {
+  test('2025 年 10 月の版が Date のまま保存した作成日時を、ISO 形式の文字列にして返す', async () => {
+    idb.seed(DB, 'recordings', [{ id: 7, name: '去年の音', tags: [], audioData: makeDataUrl('wav', 'audio/wav'), createdAt: new Date(Date.UTC(2025, 9, 16)) }], { autoIncrement: true });
+    idb.seed(DB, 'songs', []);
+    const [loaded] = await getAllRecordings();
+    expect(loaded.createdAt).toBe('2025-10-16T00:00:00.000Z');
+  });
+
+  test('前後に空白のあるタグや数字のタグも、画面と同じようにそろえてから足し引きする', async () => {
+    idb.seed(DB, 'recordings', [{ id: 7, name: '古い音', tags: [' 楽器 ', 1], audioData: makeDataUrl('wav', 'audio/wav') }], { autoIncrement: true });
+    idb.seed(DB, 'songs', []);
+    // 画面では「1」と出るので、「1」を足しても二重にならない
+    expect((await addTagToRecording(7, '1')).tags).toEqual(['楽器', '1']);
+    // 画面の「1」の × で消える（以前は数字の 1 と文字の「1」を比べていて消えなかった）
+    expect((await removeTagFromRecording(7, '1')).tags).toEqual(['楽器']);
+    expect((await removeTagFromRecording(7, '楽器')).tags).toEqual([]);
+    expect(idb.dump(DB, 'recordings')[0].tags).toEqual([]);
+  });
+});

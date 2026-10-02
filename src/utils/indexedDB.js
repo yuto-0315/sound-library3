@@ -1,6 +1,7 @@
 // IndexedDB ヘルパー関数
 import { normalizeAudioDataUrl } from './audio';
 import { toTagList, toText } from './text';
+import { toIsoDateString } from './date';
 
 const DB_NAME = 'SoundLibraryDB';
 const DB_VERSION = 2; // バージョンアップ: 録音データストアを追加
@@ -344,6 +345,9 @@ const fromStoredRecording = (recording) => ({
   // 取り込んだ楽曲などから、文字列でない名前やタグが入っていても表示できるようにする
   name: toText(recording.name, '名前のない音'),
   tags: toTagList(recording.tags),
+  // 2025 年 10 月の版は作成日時を Date のまま保存していた（文字列で比べると並び順が狂う）
+  createdAt: toIsoDateString(recording.createdAt),
+  updatedAt: toIsoDateString(recording.updatedAt),
   audioData: recording.audioData ? normalizeAudioDataUrl(recording.audioData) : recording.audioData
 });
 
@@ -465,16 +469,20 @@ export const searchRecordingsByTag = async (tag) => {
   }
 };
 
+// タグは画面と同じようにそろえてから足し引きする（以前に保存された「 楽器 」や数字の 1 などは、
+// 画面では「楽器」「1」と出るのに、そのままの値で比べていたので × を押しても消えなかった）
+
 // 録音にタグを追加 (重複は追加しない)
 export const addTagToRecording = (id, tag) => modifyRecording(id, (existing) => {
-  const tags = Array.isArray(existing.tags) ? existing.tags : [];
-  return { ...existing, tags: tags.includes(tag) ? tags : [...tags, tag] };
+  const tags = toTagList(existing.tags);
+  const value = toText(tag).trim();
+  return { ...existing, tags: !value || tags.includes(value) ? tags : [...tags, value] };
 });
 
 // 録音からタグを削除
 export const removeTagFromRecording = (id, tag) => modifyRecording(id, (existing) => ({
   ...existing,
-  tags: (existing.tags || []).filter((t) => t !== tag)
+  tags: toTagList(existing.tags).filter((t) => t !== toText(tag).trim())
 }));
 
 // ========== 移行ヘルパー ==========

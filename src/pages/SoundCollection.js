@@ -27,6 +27,7 @@ import {
 import { formatDuration, formatSeconds } from '../utils/timing';
 import { isEnterKey } from '../utils/keyboard';
 import { keepUnsavedDraft, takeUnsavedDraft } from '../utils/unsavedDraft';
+import { compareByNewest } from '../utils/date';
 
 const LEGACY_RECORDINGS_KEY = 'soundRecordings';
 
@@ -74,7 +75,9 @@ const getMicrophoneErrorMessage = (error) => {
   }
 };
 
-const byNewest = (a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''));
+// 日時は時刻（数値）で比べる（2025 年 10 月の版は Date のまま保存していて、文字列で比べると
+// 古い音が「さいきん集めた音」に居座り、新しく保存した音が出てこなかった）
+const byNewest = compareByNewest;
 
 const SoundCollection = () => {
   const [recentSounds, setRecentSounds] = useState([]);
@@ -109,7 +112,17 @@ const SoundCollection = () => {
   const { showError, clearError, ErrorRegion } = useErrorMessages();
   const preview = useAudioPreview({
     onError: () => {
-      if (isMountedRef.current) setNotice('この音はこの端末では再生できませんでした。');
+      // エラーなので、緑のお知らせではなくエラーの表示で出す
+      if (isMountedRef.current) showError('この音はこの端末では再生できませんでした。');
+    }
+  });
+  // 保存・すてる・録音しなおすで今のボタンが消えたら、録音ボタンにフォーカスを移す
+  const recordButtonRef = useRef(null);
+  const focusRecordButtonRef = useRef(false);
+  useEffect(() => {
+    if (focusRecordButtonRef.current && recordButtonRef.current) {
+      focusRecordButtonRef.current = false;
+      recordButtonRef.current.focus();
     }
   });
 
@@ -253,9 +266,9 @@ const SoundCollection = () => {
     return null;
   };
 
+  // エラーの場所（role="alert"）が読み上げるので、announce() では重ねて読ませない（以前は 2 回読まれた）
   const reportError = (message) => {
     showError(message);
-    announce(message, 'assertive');
   };
 
   const stopTimer = () => {
@@ -403,11 +416,12 @@ const SoundCollection = () => {
 
       mediaRecorderRef.current = recorder;
       streamRef.current = stream;
-      // 前の音を捨てて録り直すときは、その音の編集画面を閉じる
+      // 前の音を捨てて録り直すときは、その音の編集画面を閉じ、「録音停止」ボタンにフォーカスを移す
+      if (currentRecordingRef.current) focusRecordButtonRef.current = true;
       replaceCurrentRecording(null);
       setIsRecording(true);
       startTimer();
-      announce('録音を開始しました。', 'assertive');
+      // 録音中は読み上げない（マイクが読み上げの声まで録音してしまう）。ボタンが「録音停止」に変わる
     } finally {
       isStartingRef.current = false;
     }
@@ -486,6 +500,7 @@ const SoundCollection = () => {
       });
       setIsDraftRestored(false);
       preview.stop();
+      focusRecordButtonRef.current = true;
       // お知らせ欄（role="status"）が読み上げるので、announce() では重ねて読ませない
       setNotice(`「${record.name}」を保存しました。`);
     } catch (error) {
@@ -499,8 +514,8 @@ const SoundCollection = () => {
       const message = isQuotaExceededError(error)
         ? '保存できる容量が足りません。音ライブラリで使わない音を削除してから、もう一度保存してください。'
         : '録音の保存に失敗しました。もう一度「保存する」を押してください。';
+      // 保存ボタンの近くのエラー（role="alert"）が読み上げる
       setSaveError(message);
-      announce(message, 'assertive');
     } finally {
       if (isMountedRef.current) setIsSaving(false);
     }
@@ -546,6 +561,7 @@ const SoundCollection = () => {
   // 「この音をすてる」（保存していない音は戻せないので確認する）
   const throwAwayRecording = () => {
     if (!window.confirm(THROW_AWAY_CONFIRM_MESSAGE)) return;
+    focusRecordButtonRef.current = true;
     replaceCurrentRecording(null);
     setNotice('音をすてました。');
   };
@@ -586,6 +602,20 @@ const SoundCollection = () => {
           onRecordAgain={startRecording}
           isSaving={isSaving}
           saveError={saveError}
+          startErrorSlot={(
+            <>
+              {/* 「録音しなおす」でマイクが使えなかったときも、ここに出す（以前は画面に何も出なかった） */}
+              <ErrorRegion />
+              {micDenied && (
+                <p className="editor-mic-denied">
+                  マイクが使えません。ページを読み込み直してから、もう一度録音してください。
+                  <button type="button" className="button-secondary reload-btn" onClick={() => window.location.reload()}>
+                    <Icon icon={RefreshCw} /> ページを読み込み直す
+                  </button>
+                </p>
+              )}
+            </>
+          )}
           tagSuggestions={tagSuggestions}
           isPlaying={preview.playingId === 'editor'}
           onTogglePlay={() => preview.toggle('editor', currentRecording.url)}
@@ -603,6 +633,7 @@ const SoundCollection = () => {
               <h4 id="recording-controls-label" className="sr-only">録音操作</h4>
               {!isRecording ? (
                 <button
+                  ref={recordButtonRef}
                   className="record-btn"
                   onClick={startRecording}
                   aria-describedby="record-instructions"
@@ -614,6 +645,7 @@ const SoundCollection = () => {
                 </button>
               ) : (
                 <button
+                  ref={recordButtonRef}
                   className="record-btn stop"
                   onClick={stopRecording}
                   aria-describedby="stop-instructions"
@@ -632,7 +664,8 @@ const SoundCollection = () => {
             </div>
 
             {isRecording && (
-              <div className="recording-status" role="status" aria-label="録音状況">
+              // 録音中は読み上げない（残り秒数を毎秒読むと、その声まで録音された）
+              <div className="recording-status" aria-hidden="true">
                 <div className="recording-indicator">
                   <span className="pulse-dot" aria-hidden="true"></span>
                   録音中...
@@ -742,7 +775,8 @@ const RecordingEditor = ({
   isDraftRestored = false,
   tagSuggestions = [],
   isPlaying = false,
-  onTogglePlay
+  onTogglePlay,
+  startErrorSlot = null
 }) => {
   const [name, setName] = useState(recording.name);
   const [tagInput, setTagInput] = useState('');
@@ -750,6 +784,11 @@ const RecordingEditor = ({
   const [validationMessage, setValidationMessage] = useState('');
   const headingRef = useRef(null);
   const editorRef = useRef(null);
+  const tagInputRef = useRef(null);
+  // 押した候補や × は消えるので、タグの入力欄にフォーカスを移す（ページの先頭に戻らないように）
+  const focusTagInput = () => {
+    if (tagInputRef.current) tagInputRef.current.focus();
+  };
 
   // 録音が終わったら、編集画面を見える所に出して読み上げにも知らせる
   useEffect(() => {
@@ -863,6 +902,7 @@ const RecordingEditor = ({
         </label>
         <div className="tag-input-container">
           <input
+            ref={tagInputRef}
             id="soundTags"
             type="text"
             value={tagInput}
@@ -890,7 +930,15 @@ const RecordingEditor = ({
         {unusedSuggestions.length > 0 && (
           <div className="tag-suggestions" role="group" aria-label="タグの候補">
             {unusedSuggestions.map((tag) => (
-              <button key={tag} type="button" className="chip chip-suggestion" onClick={() => addTag(tag)}>
+              <button
+                key={tag}
+                type="button"
+                className="chip chip-suggestion"
+                onClick={() => {
+                  addTag(tag);
+                  focusTagInput();
+                }}
+              >
                 <Icon icon={Plus} /> {tag}
               </button>
             ))}
@@ -900,13 +948,17 @@ const RecordingEditor = ({
         {tags.length > 0 && (
           <div className="tags-display" role="group" aria-labelledby="tags-label">
             <p id="tags-label" className="tags-title">追加されたタグ:</p>
-            <ul className="tags-list" aria-live="polite">
+            {/* 追加・削除は下のメッセージで読み上げる（リストも読み上げると 2 回になる） */}
+            <ul className="tags-list">
               {tags.map((tag) => (
                 <li key={tag} className="tag-item">
                   <span className="tag">
                     {tag}
                     <button
-                      onClick={() => removeTag(tag)}
+                      onClick={() => {
+                        removeTag(tag);
+                        focusTagInput();
+                      }}
                       className="remove-tag"
                       type="button"
                       aria-label={`タグ「${tag}」を削除`}
@@ -921,14 +973,14 @@ const RecordingEditor = ({
         )}
       </div>
 
-      {validationMessage && (
-        <div className="validation-message" role="status" aria-live="polite">
-          {validationMessage}
-        </div>
-      )}
+      {/* 読み上げの場所は空でも置いておく（あとから作ると、最初のメッセージが読まれないことがある） */}
+      <div className="validation-message" role="status" aria-live="polite">
+        {validationMessage}
+      </div>
 
       {/* 保存のエラーは保存ボタンの近くに出す（以前はページの上に出て見えなかった） */}
       {saveError && <div className="error-message" role="alert">{saveError}</div>}
+      {startErrorSlot}
 
       <div className="editor-actions" role="group" aria-labelledby="actions-label">
         <p id="actions-label" className="sr-only">保存・録り直し・すてる操作</p>

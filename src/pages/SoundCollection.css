@@ -2,10 +2,8 @@
    どの指定も .sound-collection の中だけに効かせる（以前はページの CSS が 1 つにまとまり、
    ほかのページの同じ名前のクラスまで変えていた） */
 
-.sound-collection .collection-notice-region:empty {
-  display: none;
-}
-
+/* お知らせ・読み上げの場所は空でも消さない（display: none にすると、あとから入ったお知らせを
+   読み上げソフトが読まないことがある） */
 .sound-collection .collection-notice {
   margin: 0 0 14px;
 }
@@ -412,6 +410,21 @@
   margin-bottom: 12px;
   color: var(--color-primary-soft-text);
   font-size: 14px;
+}
+
+.sound-collection .validation-message:empty {
+  margin: 0;
+}
+
+/* 「録音しなおす」でマイクが使えなかったとき */
+.sound-collection .editor-mic-denied {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 0 0 12px;
+  color: var(--color-text);
+  font-size: 15px;
 }
 
 .sound-collection .recording-editor .error-message {

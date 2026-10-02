@@ -73,6 +73,12 @@
   outline-offset: 2px;
 }
 
+/* :focus-visible を使えない iPadOS 15.3 以前では、全体の青いフォーカスの枠が青いメニューの上に出て
+   見えなかった。色だけ変える（新しいブラウザでは、マウスや指で押したときは枠そのものが出ない） */
+.nav-link:focus {
+  outline-color: #facc15;
+}
+
 /* 縦向きの iPad など: タイトルは記号だけにして、ページの切り替えを 1 行に収める */
 @media (max-width: 900px) {
   .nav-title-text {

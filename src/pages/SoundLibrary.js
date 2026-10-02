@@ -28,6 +28,7 @@ import { getAllRecordings, deleteRecording, addTagToRecording, removeTagFromReco
 import { dataUrlToBlob, measureAudioDuration } from '../utils/audio';
 import { formatDuration } from '../utils/timing';
 import { matchesSearch } from '../utils/text';
+import { compareByNewest, toTimestamp } from '../utils/date';
 import { isEnterKey } from '../utils/keyboard';
 
 // 「タグごと」は仕様の「タグごとにソートする機能」。タグの見出しごとに音をまとめて並べる
@@ -40,9 +41,10 @@ const SORT_OPTIONS = [
 const SORT_STORAGE_KEY = 'sound-library-sort-order';
 const UNTAGGED_TITLE = 'タグなし';
 
+// 日時は時刻（数値）で比べる（2025 年 10 月の版は Date のまま保存していて、文字列で比べると順番が狂った）
 const compareBy = {
-  newest: (a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')),
-  oldest: (a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')),
+  newest: compareByNewest,
+  oldest: (a, b) => toTimestamp(a.createdAt) - toTimestamp(b.createdAt),
   name: (a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'ja')
 };
 
@@ -71,13 +73,24 @@ const SoundLibrary = () => {
   const [sortOrder, setSortOrder] = useState(readSortOrder);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
-  const [actionError, setActionError] = useState('');
+  // 失敗のお知らせ。soundId のある失敗は、その音のカードの中に出す
+  // （以前は一覧の上に出し、下の方のカードを操作したときは画面の外で見えなかった）
+  const [actionError, setActionError] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const soundsRef = useRef(sounds);
   soundsRef.current = sounds;
   const isMountedRef = useRef(true);
   const preview = useAudioPreview({
-    onError: () => setActionError('この音はこの端末では再生できませんでした。')
+    onError: (soundId) => setActionError({ soundId, text: 'この音はこの端末では再生できませんでした。' })
+  });
+  const searchInputRef = useRef(null);
+  // 消したあとなど、ボタンが無くなったときのフォーカスの移し先（次に描き直したあとに実行する）
+  const focusAfterRenderRef = useRef(null);
+  useEffect(() => {
+    const focus = focusAfterRenderRef.current;
+    if (!focus) return;
+    focusAfterRenderRef.current = null;
+    focus();
   });
 
   useEffect(() => {
@@ -195,6 +208,8 @@ const SoundLibrary = () => {
   const clearFilters = () => {
     setSelectedTag('');
     setSearchQuery('');
+    // 「フィルターをクリア」は押すと消えるので、検索欄にフォーカスを移す
+    if (searchInputRef.current) searchInputRef.current.focus();
   };
 
   const changeSortOrder = (value) => {
@@ -204,46 +219,58 @@ const SoundLibrary = () => {
 
   const deleteSound = async (sound) => {
     setDeleteTarget(null);
-    setActionError('');
+    setActionError(null);
+    // 消した音のカードは無くなるので、となりの音（後ろ、なければ前）の ▶ にフォーカスを移す
+    const order = filteredSounds.map((item) => item.id);
+    const index = order.indexOf(sound.id);
+    const neighborId = index >= 0 ? (order[index + 1] !== undefined ? order[index + 1] : order[index - 1]) : undefined;
     try {
       if (preview.playingId === sound.id) preview.stop();
       await deleteRecording(sound.id);
+      focusAfterRenderRef.current = () => {
+        const neighbor = neighborId !== undefined
+          ? document.querySelector(`.library-sound-card[data-sound-id="${neighborId}"] .library-play-btn`)
+          : null;
+        const fallback = searchInputRef.current || document.querySelector('.sound-library .no-sounds a');
+        const target = neighbor || fallback;
+        if (target) target.focus();
+      };
       setSounds(prev => prev.filter(item => item.id !== sound.id));
     } catch (error) {
       console.error('削除エラー:', error);
-      setActionError('音素材の削除に失敗しました。');
+      setActionError({ soundId: sound.id, text: '音素材の削除に失敗しました。' });
     }
   };
 
   const handleAddTag = async (soundId, tag) => {
-    setActionError('');
+    setActionError(null);
     try {
       replaceSound(await addTagToRecording(soundId, tag));
     } catch (error) {
       console.error('タグ追加エラー:', error);
-      setActionError('タグの追加に失敗しました。');
+      setActionError({ soundId, text: 'タグの追加に失敗しました。' });
     }
   };
 
   const handleRemoveTag = async (soundId, tag) => {
-    setActionError('');
+    setActionError(null);
     try {
       replaceSound(await removeTagFromRecording(soundId, tag));
     } catch (error) {
       console.error('タグ削除エラー:', error);
-      setActionError('タグの削除に失敗しました。');
+      setActionError({ soundId, text: 'タグの削除に失敗しました。' });
     }
   };
 
   // 名前を変える（音楽づくりのタイムラインに置いた音は、置いたときの名前のまま残る）
   const handleRename = async (soundId, name) => {
-    setActionError('');
+    setActionError(null);
     try {
       replaceSound(await updateRecording(soundId, { name }));
       return true;
     } catch (error) {
       console.error('名前の変更エラー:', error);
-      setActionError('名前を変えられませんでした。');
+      setActionError({ soundId, text: '名前を変えられませんでした。' });
       return false;
     }
   };
@@ -282,6 +309,8 @@ const SoundLibrary = () => {
       idPrefix={idPrefix}
       sound={sound}
       allTags={allTags}
+      error={actionError && actionError.soundId === sound.id ? actionError.text : ''}
+      onDismissError={() => setActionError(null)}
       isPlaying={preview.playingId === sound.id}
       onTogglePlay={() => preview.toggle(sound.id, sound.audioData)}
       onDelete={() => setDeleteTarget(sound)}
@@ -314,6 +343,7 @@ const SoundLibrary = () => {
           <div className="library-search">
             <label htmlFor="library-search" className="field-label"><Icon icon={Search} /> 音を探す</label>
             <input
+              ref={searchInputRef}
               id="library-search"
               type="search"
               placeholder="音の名前やタグで検索..."
@@ -367,10 +397,11 @@ const SoundLibrary = () => {
         )}
       </section>
 
-      {actionError && (
+      {/* カードが見えていない（絞り込みで隠れた）ときだけ、一覧の上に出す */}
+      {actionError && !filteredSounds.some((sound) => sound.id === actionError.soundId) && (
         <div className="error-message library-error" role="alert">
-          <span>{actionError}</span>
-          <button type="button" onClick={() => setActionError('')} aria-label="メッセージを閉じる"><Icon icon={X} /></button>
+          <span>{actionError.text}</span>
+          <button type="button" onClick={() => setActionError(null)} aria-label="メッセージを閉じる"><Icon icon={X} /></button>
         </div>
       )}
 
@@ -440,13 +471,21 @@ const SoundLibrary = () => {
   );
 };
 
-const LibrarySoundCard = ({ idPrefix = '', sound, allTags, isPlaying, onTogglePlay, onDelete, onAddTag, onRemoveTag, onRename }) => {
+const LibrarySoundCard = ({ idPrefix = '', sound, allTags, error = '', onDismissError, isPlaying, onTogglePlay, onDelete, onAddTag, onRemoveTag, onRename }) => {
   const [showTagEditor, setShowTagEditor] = useState(false);
   const [isRenaming, setIsRenaming] = useState(false);
   const [newTag, setNewTag] = useState('');
   const [nameDraft, setNameDraft] = useState(sound.name);
   const renameInputRef = useRef(null);
   const renameButtonRef = useRef(null);
+  const tagInputRef = useRef(null);
+  // タグの編集を開いたら入力欄へ。押した候補や × は消えるので、そのあとも入力欄へ戻す
+  const focusTagInput = () => {
+    if (tagInputRef.current) tagInputRef.current.focus();
+  };
+  useEffect(() => {
+    if (showTagEditor) focusTagInput();
+  }, [showTagEditor]);
 
   useEffect(() => {
     if (isRenaming && renameInputRef.current) {
@@ -500,7 +539,7 @@ const LibrarySoundCard = ({ idPrefix = '', sound, allTags, isPlaying, onTogglePl
   const suggestions = allTags.filter((tag) => !tags.includes(tag)).slice(0, 8);
 
   return (
-    <li className="library-sound-card">
+    <li className="library-sound-card" data-sound-id={sound.id}>
       <div className="library-card-main">
         <button
           type="button"
@@ -555,7 +594,10 @@ const LibrarySoundCard = ({ idPrefix = '', sound, allTags, isPlaying, onTogglePl
                     <button
                       type="button"
                       className="tag-remove-btn"
-                      onClick={() => onRemoveTag(sound.id, tag)}
+                      onClick={() => {
+                        onRemoveTag(sound.id, tag);
+                        focusTagInput();
+                      }}
                       title="タグを削除"
                       aria-label={`タグ「${tag}」を削除`}
                     >
@@ -574,6 +616,7 @@ const LibrarySoundCard = ({ idPrefix = '', sound, allTags, isPlaying, onTogglePl
           <div className="tag-editor-row">
             <label htmlFor={`${idPrefix}new-tag-${sound.id}`} className="sr-only">「{sound.name}」に付けるタグ</label>
             <input
+              ref={tagInputRef}
               id={`${idPrefix}new-tag-${sound.id}`}
               type="text"
               value={newTag}
@@ -591,12 +634,27 @@ const LibrarySoundCard = ({ idPrefix = '', sound, allTags, isPlaying, onTogglePl
           {suggestions.length > 0 && (
             <div className="tag-editor-suggestions" role="group" aria-label="ほかの音に付いているタグ">
               {suggestions.map((tag) => (
-                <button key={tag} type="button" className="chip chip-suggestion" onClick={() => handleAddTag(tag)}>
+                <button
+                  key={tag}
+                  type="button"
+                  className="chip chip-suggestion"
+                  onClick={() => {
+                    handleAddTag(tag);
+                    focusTagInput();
+                  }}
+                >
                   <Icon icon={Plus} /> {tag}
                 </button>
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {error && (
+        <div className="error-message library-card-error" role="alert">
+          <span>{error}</span>
+          <button type="button" onClick={onDismissError} aria-label="メッセージを閉じる"><Icon icon={X} /></button>
         </div>
       )}
 

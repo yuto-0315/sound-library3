@@ -29,3 +29,21 @@ export const formatDateJa = (value) => {
   const date = parseServerDate(value);
   return date ? date.toLocaleDateString('ja-JP') : '';
 };
+
+// 並べ替え用の時刻（ミリ秒）。読めない値は 0（いちばん古い扱い）。
+// 2025 年 10 月の版は、録音の作成日時を文字列ではなく Date のまま IndexedDB に保存していた。
+// 文字列として比べると「Thu Oct 16 2025 …」が「2026-…」より新しい扱いになり、古い音が先頭に並んでいた
+export const toTimestamp = (value) => {
+  const date = parseServerDate(value);
+  return date ? date.getTime() : 0;
+};
+
+// 新しい順に並べる比較関数（createdAt を持つもの）
+export const compareByNewest = (a, b) => toTimestamp(b && b.createdAt) - toTimestamp(a && a.createdAt);
+
+// 保存されていた日時を ISO 形式の文字列にそろえる（Date・数値・文字列のどれでも）。読めなければ元の値のまま
+export const toIsoDateString = (value) => {
+  if (typeof value === 'string') return value;
+  const date = parseServerDate(value);
+  return date ? date.toISOString() : value;
+};

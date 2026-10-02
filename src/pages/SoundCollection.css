@@ -449,6 +449,11 @@
 }
 
 .sound-collection .recent-library-link {
+  /* 指で押しやすい高さにする（文字だけだと 26px で押しにくかった） */
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tap-min);
+  padding: 0 4px;
   color: var(--color-primary);
   font-weight: 700;
 }

@@ -30,9 +30,13 @@ dist/
 ehthumbs.db
 Thumbs.db
 
+# 先生用の暗証番号（api/admin_pin.example.php をコピーして作る。git には入れない）
+api/admin_pin.php
+
 # Uploaded files (don't commit user uploads)
 api/uploads/audio/*
 !api/uploads/audio/.gitkeep
+!api/uploads/audio/.htaccess
 
 # Logs
 *.log
@@ -41,6 +45,13 @@ logs/
 # Coverage directory used by tools like istanbul
 coverage/
 
+# Playwright（E2E テスト）の結果
+playwright-report/
+test-results/
+blob-report/
+/playwright/.cache/
+
 # Temporary files
 *.tmp
 *.temp
+backup/

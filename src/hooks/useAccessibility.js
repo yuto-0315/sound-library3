@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 
 /**
  * フォーカス管理フック
@@ -22,21 +22,23 @@ export const useFocus = (shouldFocus = false) => {
 export const useAnnouncement = () => {
   const announcementRef = useRef(null);
 
-  const announce = (message, priority = 'polite') => {
+  const announce = useCallback((message, priority = 'polite') => {
     if (announcementRef.current) {
       announcementRef.current.setAttribute('aria-live', priority);
       announcementRef.current.textContent = message;
     }
-  };
+  }, []);
 
-  const AnnouncementRegion = ({ className = '' }) => (
+  // コンポーネントの同一性を保つ（毎レンダー作り直すと DOM が再生成され、
+  // announce() で書き込んだ内容が次の再レンダーで消えてしまう）
+  const AnnouncementRegion = useCallback(({ className = '' }) => (
     <div
       ref={announcementRef}
       aria-live="polite"
       aria-atomic="true"
       className={`sr-only ${className}`}
     />
-  );
+  ), []);
 
   return { announce, AnnouncementRegion };
 };
@@ -134,28 +136,29 @@ export const useKeyboardNavigation = (items, options = {}) => {
 export const useErrorMessages = () => {
   const errorRef = useRef(null);
 
-  const showError = (message) => {
+  const showError = useCallback((message) => {
     if (errorRef.current) {
       errorRef.current.textContent = message;
       errorRef.current.setAttribute('aria-live', 'assertive');
     }
-  };
+  }, []);
 
-  const clearError = () => {
+  const clearError = useCallback(() => {
     if (errorRef.current) {
       errorRef.current.textContent = '';
       errorRef.current.removeAttribute('aria-live');
     }
-  };
+  }, []);
 
-  const ErrorRegion = ({ className = '' }) => (
+  // AnnouncementRegion と同じ理由で同一性を保つ（エラーが表示直後に消える不具合の対策）
+  const ErrorRegion = useCallback(({ className = '' }) => (
     <div
       ref={errorRef}
       role="alert"
       className={`error-message ${className}`}
       aria-atomic="true"
     />
-  );
+  ), []);
 
   return { showError, clearError, ErrorRegion };
 };
@@ -166,7 +169,7 @@ export const useErrorMessages = () => {
 export const useProgress = () => {
   const progressRef = useRef(null);
 
-  const updateProgress = (current, total, label = '') => {
+  const updateProgress = useCallback((current, total, label = '') => {
     if (progressRef.current) {
       const percentage = Math.round((current / total) * 100);
       progressRef.current.setAttribute('aria-valuenow', current);
@@ -175,9 +178,9 @@ export const useProgress = () => {
         `${label} ${percentage}% 完了 (${current} / ${total})`
       );
     }
-  };
+  }, []);
 
-  const ProgressBar = ({ className = '', label = '進捗' }) => (
+  const ProgressBar = useCallback(({ className = '', label = '進捗' }) => (
     <div
       ref={progressRef}
       role="progressbar"
@@ -187,7 +190,7 @@ export const useProgress = () => {
       aria-valuemax={100}
       className={`progress-bar ${className}`}
     />
-  );
+  ), []);
 
   return { updateProgress, ProgressBar };
 };

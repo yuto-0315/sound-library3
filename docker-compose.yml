@@ -1,0 +1,79 @@
+# 音楽づくり支援アプリを Docker で動かす（使い方は DOCKER.md）
+#   起動:  docker compose up -d --build --wait     （Windows は start-docker.bat）
+#   停止:  docker compose down                      （Windows は stop-docker.bat）
+#   iPad で録音も使うとき（HTTPS）: start-docker-https.bat / docker compose --profile https up -d --build --wait
+#
+# 設定を変えるときは、このファイルと同じ場所に .env を作る（docker/env.example を参照）。
+
+name: sound-library
+
+services:
+  # データベース（MySQL 8.0）。初回だけ database/create_database.sql で表を作る
+  db:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: sound_library_cloud
+      MYSQL_USER: sound_library
+      MYSQL_PASSWORD: ${DB_PASSWORD:-change-me-sound-library}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-change-me-root}
+      TZ: Asia/Tokyo
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
+    volumes:
+      - db-data:/var/lib/mysql
+      - ./database/create_database.sql:/docker-entrypoint-initdb.d/01-create_database.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    # データベースはパソコンの外には公開しない（web からだけ使う）
+
+  # 画面 + PHP の API（Apache）
+  web:
+    build:
+      context: .
+      dockerfile: docker/web/Dockerfile
+    image: sound-library-web
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_HOST: db
+      DB_PORT: "3306"
+      DB_NAME: sound_library_cloud
+      DB_USER: sound_library
+      DB_PASSWORD: ${DB_PASSWORD:-change-me-sound-library}
+      # 先生用ページの暗証番号（半角の英数字・記号で 6 文字以上。空なら確認しない）
+      SOUND_LIBRARY_ADMIN_PIN: ${ADMIN_PIN:-}
+      TZ: Asia/Tokyo
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    volumes:
+      - uploads:/var/www/html/api/uploads/audio
+
+  # （必要なときだけ）iPad で録音するための HTTPS。
+  # ブラウザは http://（localhost 以外）ではマイクを使わせないため、iPad から録音するには HTTPS が必要。
+  # Caddy が自分で作った証明書を使う。iPad にはその証明書（ルート証明書）を一度入れて信頼する（DOCKER.md）
+  https:
+    image: caddy:2
+    profiles: ["https"]
+    restart: unless-stopped
+    depends_on:
+      - web
+    environment:
+      HOST_IP: ${HOST_IP:-127.0.0.1}
+      HTTPS_PORT: ${HTTPS_PORT:-8443}
+    ports:
+      - "${HTTPS_PORT:-8443}:443"
+      - "${CERT_PORT:-8081}:80"
+    volumes:
+      - ./docker/https/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+
+volumes:
+  db-data:
+  uploads:
+  caddy-data:

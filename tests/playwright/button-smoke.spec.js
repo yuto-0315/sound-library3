@@ -2,23 +2,33 @@ const { test, expect } = require('@playwright/test');
 const fs = require('fs');
 const path = require('path');
 
-// pages to visit in order
+// pages to visit in order（HashRouter なので # の後ろがページ。以前は存在しない /sound-library を開いていた）
+const BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:5050';
 const PAGES = [
-  '/',
-  '/sound-library',
-  '/cloud',
-  '/daw'
+  '/#/',
+  '/#/library',
+  '/#/cloud',
+  '/#/daw'
 ];
+
+// 録音開始ボタンも押すので、偽のマイクを使う（マイクの無い環境では「マイクの取得に失敗」と出るため）
+test.use({
+  permissions: ['microphone'],
+  launchOptions: {
+    executablePath: process.env.E2E_CHROMIUM_PATH || undefined,
+    args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream']
+  }
+});
 
 // selectors of common buttons to try click (will be attempted if present)
 const COMMON_BUTTONS = [
   'button',
-  'a[role="button"]',
   '.play-sound-btn',
-  '.play-button',
-  '.download-button',
+  '.place-sound-btn',
+  '.library-play-btn',
   '.track-add-btn',
   '.remove-track-btn',
+  '.zoom-btn',
   '.button-primary',
   '.button-secondary'
 ];
@@ -44,7 +54,7 @@ test('button smoke test - click common buttons and check console', async ({ page
   const report = [];
 
   for (const route of PAGES) {
-    const url = `http://localhost:5000${route}`;
+    const url = `${BASE_URL}${route}`;
     await page.goto(url, { waitUntil: 'load' });
 
     const messages = [];

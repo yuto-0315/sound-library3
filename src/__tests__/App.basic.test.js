@@ -15,9 +15,9 @@ describe('App Component - Basic Tests', () => {
     render(<App />);
     
     // ナビゲーション要素が表示される（role指定で特定）
-    expect(screen.getByRole('menuitem', { name: /音あつめ/ })).toBeInTheDocument();
-    expect(screen.getByRole('menuitem', { name: /音ライブラリ/ })).toBeInTheDocument();
-    expect(screen.getByRole('menuitem', { name: /音楽づくり/ })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /音あつめ/ })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /音ライブラリ/ })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /音楽づくり/ })).toBeInTheDocument();
   });
 
   test('has basic accessibility structure', () => {

@@ -1,6 +1,6 @@
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { BrowserRouter, MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
 import '@testing-library/jest-dom';
 import Navigation from '../components/Navigation';
 
@@ -13,109 +13,117 @@ const renderWithRouter = (component, { initialEntries = ['/'] } = {}) => {
   );
 };
 
+const CurrentPath = () => <div data-testid="current-path">{useLocation().pathname}</div>;
+
 describe('Navigation Component', () => {
   test('renders navigation structure correctly', () => {
     renderWithRouter(<Navigation />);
-    
+
     // ナビゲーション要素が存在する
     expect(screen.getByRole('navigation')).toBeInTheDocument();
     expect(screen.getByRole('navigation')).toHaveAttribute('aria-label', 'メインナビゲーション');
-    
+
     // タイトルが表示される
     expect(screen.getByText('音楽づくりアプリ')).toBeInTheDocument();
-    
-    // メニューバーが存在する
-    expect(screen.getByRole('menubar')).toBeInTheDocument();
+
+    // ページへのリンクがリストで並んでいる（menubar はアプリのメニュー用の役割なので使わない）
+    expect(screen.getByRole('list')).toBeInTheDocument();
+    expect(screen.queryByRole('menubar')).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitem')).not.toBeInTheDocument();
   });
 
   test('displays all navigation links', () => {
     renderWithRouter(<Navigation />);
-    
-    // 全てのナビゲーションリンクが表示される
-    expect(screen.getByRole('menuitem', { name: /音あつめ/ })).toBeInTheDocument();
-    expect(screen.getByRole('menuitem', { name: /音ライブラリ/ })).toBeInTheDocument();
-    expect(screen.getByRole('menuitem', { name: /音楽づくり/ })).toBeInTheDocument();
+
+    expect(screen.getByRole('link', { name: /音あつめ/ })).toHaveAttribute('href', '/collection');
+    expect(screen.getByRole('link', { name: /音ライブラリ/ })).toHaveAttribute('href', '/library');
+    expect(screen.getByRole('link', { name: /音楽づくり/ })).toHaveAttribute('href', '/daw');
+    expect(screen.getByRole('link', { name: /みんなで共有/ })).toHaveAttribute('href', '/cloud');
+    expect(screen.getAllByRole('link')).toHaveLength(4);
   });
 
-  test('shows correct active state for collection page', () => {
-    renderWithRouter(<Navigation />, { initialEntries: ['/collection'] });
-    
-    // 音あつめページがアクティブ状態
-    const collectionLink = screen.getByRole('menuitem', { name: /音あつめ/ });
-    expect(collectionLink).toHaveAttribute('aria-current', 'page');
-    expect(collectionLink).toHaveClass('active');
-    
-    // 現在のページ情報が表示される
-    expect(screen.getByText('現在のページ: 音あつめページ')).toBeInTheDocument();
-  });
+  test.each([
+    ['/collection', /音あつめ/, '現在のページ: 音あつめページ'],
+    ['/library', /音ライブラリ/, '現在のページ: 音ライブラリページ'],
+    ['/daw', /音楽づくり/, '現在のページ: 音楽づくりページ'],
+    ['/cloud', /みんなで共有/, '現在のページ: みんなで共有ページ']
+  ])('%s では対応するリンクが「今のページ」になる', (path, linkName, announcement) => {
+    renderWithRouter(<Navigation />, { initialEntries: [path] });
 
-  test('shows correct active state for library page', () => {
-    renderWithRouter(<Navigation />, { initialEntries: ['/library'] });
-    
-    // 音ライブラリページがアクティブ状態
-    const libraryLink = screen.getByRole('menuitem', { name: /音ライブラリ/ });
-    expect(libraryLink).toHaveAttribute('aria-current', 'page');
-    expect(libraryLink).toHaveClass('active');
-    
-    // 現在のページ情報が表示される
-    expect(screen.getByText('現在のページ: 音ライブラリページ')).toBeInTheDocument();
-  });
-
-  test('shows correct active state for daw page', () => {
-    renderWithRouter(<Navigation />, { initialEntries: ['/daw'] });
-    
-    // 音楽づくりページがアクティブ状態
-    const dawLink = screen.getByRole('menuitem', { name: /音楽づくり/ });
-    expect(dawLink).toHaveAttribute('aria-current', 'page');
-    expect(dawLink).toHaveClass('active');
-    
-    // 現在のページ情報が表示される
-    expect(screen.getByText('現在のページ: 音楽づくりページ')).toBeInTheDocument();
+    const activeLink = screen.getByRole('link', { name: linkName });
+    expect(activeLink).toHaveAttribute('aria-current', 'page');
+    expect(activeLink).toHaveClass('active');
+    // 今のページ以外は aria-current を持たない
+    screen.getAllByRole('link')
+      .filter((link) => link !== activeLink)
+      .forEach((link) => expect(link).not.toHaveAttribute('aria-current'));
+    expect(screen.getByText(announcement)).toBeInTheDocument();
   });
 
   test('handles root path correctly', () => {
     renderWithRouter(<Navigation />, { initialEntries: ['/'] });
-    
+
     // ルートパスでは音あつめページがアクティブ
-    const collectionLink = screen.getByRole('menuitem', { name: /音あつめ/ });
+    const collectionLink = screen.getByRole('link', { name: /音あつめ/ });
     expect(collectionLink).toHaveAttribute('aria-current', 'page');
     expect(collectionLink).toHaveClass('active');
   });
 
+  test('先生用ページではどのリンクも「今のページ」にならない', () => {
+    renderWithRouter(<Navigation />, { initialEntries: ['/admin'] });
+    screen.getAllByRole('link').forEach((link) => expect(link).not.toHaveAttribute('aria-current'));
+    expect(screen.getByText('現在のページ: 先生用管理ページ')).toBeInTheDocument();
+  });
+
   test('has proper accessibility attributes', () => {
     renderWithRouter(<Navigation />);
-    
-    // アクセシビリティ属性が正しく設定されている
-    expect(screen.getByRole('navigation')).toHaveAttribute('aria-label', 'メインナビゲーション');
-    
+
     // 各リンクに適切な説明が設定されている
-    expect(screen.getByText('音を録音したりファイルをアップロードするページ')).toBeInTheDocument();
-    expect(screen.getByText('収集した音素材を管理・検索するページ')).toBeInTheDocument();
-    expect(screen.getByText('音素材を組み合わせて音楽を作成するページ')).toBeInTheDocument();
-    
+    expect(screen.getByRole('link', { name: /音あつめ/ })).toHaveAccessibleDescription('音を録音したりファイルをアップロードするページ');
+    expect(screen.getByRole('link', { name: /音ライブラリ/ })).toHaveAccessibleDescription('収集した音素材を管理・検索するページ');
+    expect(screen.getByRole('link', { name: /音楽づくり/ })).toHaveAccessibleDescription('音素材を組み合わせて音楽を作成するページ');
+
     // スクリーンリーダー用の情報が存在する
     expect(screen.getByText(/現在のページ:/)).toBeInTheDocument();
   });
 
-  test('has proper role attributes for menu items', () => {
-    renderWithRouter(<Navigation />);
-    
-    // 全てのメニューアイテムが正しいroleを持つ
-    const menuItems = screen.getAllByRole('menuitem');
-    expect(menuItems).toHaveLength(3);
-    
-    menuItems.forEach(item => {
-      expect(item).toHaveAttribute('role', 'menuitem');
+  test('すべてのリンクに Tab で移動できる', () => {
+    renderWithRouter(<Navigation />, { initialEntries: ['/daw'] });
+    screen.getAllByRole('link').forEach((link) => {
+      expect(link).not.toHaveAttribute('tabindex');
     });
   });
 
-  test('displays emoji icons correctly', () => {
+  test('矢印キーやスペースキーではページが切り替わらない（以前は menubar の操作でページが変わっていた）', () => {
+    render(
+      <MemoryRouter initialEntries={['/collection']}>
+        <Navigation />
+        <Routes>
+          <Route path="*" element={<CurrentPath />} />
+        </Routes>
+      </MemoryRouter>
+    );
+    const library = screen.getByRole('link', { name: /音ライブラリ/ });
+    library.focus();
+    fireEvent.keyDown(library, { key: 'ArrowRight' });
+    fireEvent.keyDown(library, { key: ' ' });
+    fireEvent.keyDown(library, { key: 'ArrowDown' });
+    expect(library).toHaveFocus();
+    expect(screen.getByTestId('current-path')).toHaveTextContent('/collection');
+
+    // リンクを押せば移動する
+    fireEvent.click(library);
+    expect(screen.getByTestId('current-path')).toHaveTextContent('/library');
+  });
+
+  test('リンクの名前はページ名だけ（アイコンの名前や説明が混ざって 2 回読まれない）', () => {
     renderWithRouter(<Navigation />);
-    
-    // 絵文字が正しく表示される
+
+    expect(screen.getByRole('link', { name: '音あつめ' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '音ライブラリ' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '音楽づくり' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'みんなで共有' })).toBeInTheDocument();
+    // アプリのタイトルの記号には名前がある
     expect(screen.getByLabelText('音符')).toBeInTheDocument();
-    expect(screen.getByLabelText('マイク')).toBeInTheDocument();
-    expect(screen.getByLabelText('本')).toBeInTheDocument();
-    expect(screen.getByLabelText('ピアノ')).toBeInTheDocument();
   });
 });

@@ -1,22 +1,25 @@
 -- 音楽アプリ用データベースの作成
-CREATE DATABASE IF NOT EXISTS sound_library_cloud 
-  CHARACTER SET utf8mb4 
+-- 何度実行してもよいように IF NOT EXISTS / INSERT IGNORE にしている。
+-- （以前は JSON 列 tags に直接インデックスを作ろうとして MySQL・MariaDB ともエラーになり、
+--   そこで止まって以降のインデックスと初期データが作られていなかった）
+CREATE DATABASE IF NOT EXISTS sound_library_cloud
+  CHARACTER SET utf8mb4
   COLLATE utf8mb4_unicode_ci;
 
 USE sound_library_cloud;
 
 -- 部屋（Room）テーブル
-CREATE TABLE rooms (
+CREATE TABLE IF NOT EXISTS rooms (
   id INT PRIMARY KEY AUTO_INCREMENT,
   room_number INT UNIQUE NOT NULL,
   room_name VARCHAR(255) NOT NULL DEFAULT 'Room',
   teacher_name VARCHAR(255),
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 音声ファイルテーブル
-CREATE TABLE audio_files (
+CREATE TABLE IF NOT EXISTS audio_files (
   id INT PRIMARY KEY AUTO_INCREMENT,
   uid VARCHAR(255) UNIQUE NOT NULL,
   room_id INT NOT NULL,
@@ -30,11 +33,12 @@ CREATE TABLE audio_files (
   tags JSON,
   upload_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   download_count INT DEFAULT 0,
+  INDEX idx_audio_room (room_id),
   FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 曲データテーブル（DAWで作成された楽曲）
-CREATE TABLE song_data (
+CREATE TABLE IF NOT EXISTS song_data (
   id INT PRIMARY KEY AUTO_INCREMENT,
   uid VARCHAR(255) UNIQUE NOT NULL,
   room_id INT NOT NULL,
@@ -44,28 +48,21 @@ CREATE TABLE song_data (
   song_data JSON NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_song_room (room_id),
+  INDEX idx_song_group (group_number),
   FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ダウンロード履歴テーブル（重複ダウンロード防止）
-CREATE TABLE download_history (
+CREATE TABLE IF NOT EXISTS download_history (
   id INT PRIMARY KEY AUTO_INCREMENT,
   audio_uid VARCHAR(255) NOT NULL,
   user_identifier VARCHAR(255) NOT NULL,
   downloaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY unique_download (audio_uid, user_identifier),
   FOREIGN KEY (audio_uid) REFERENCES audio_files(uid) ON DELETE CASCADE
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- インデックスの作成（パフォーマンス向上のため）
-CREATE INDEX idx_rooms_number ON rooms(room_number);
-CREATE INDEX idx_audio_room ON audio_files(room_id);
-CREATE INDEX idx_audio_tags ON audio_files(tags);
-CREATE INDEX idx_song_room ON song_data(room_id);
-CREATE INDEX idx_song_group ON song_data(group_number);
-
--- 初期データの挿入（テスト用）
-INSERT INTO rooms (room_number, room_name, teacher_name) VALUES 
-(101, '1年1組', '田中先生'),
-(102, '1年2組', '佐藤先生'),
-(201, '2年1組', '鈴木先生');
+-- 試しに使う部屋は database/sample_data.sql にある（手元で試すときだけ実行する）。
+-- 以前はここで入れていたため、本番でこのファイルを実行し直すと、削除した試しの部屋がよみがえり、
+-- その部屋番号をクラスで使えなくなっていた。

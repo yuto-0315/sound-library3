@@ -21,29 +21,16 @@
     
     <!-- フォーカス可視化のためのCSS -->
     <style>
-      /* フォーカス可視化の基本スタイル */
+      /* フォーカス可視化の基本スタイル（キーボード操作のときだけ枠を出す）。
+         以前は指やマウスで押しただけでも枠が残り、選ばれていないボタンが選ばれているように見えていた。
+         :focus-visible に対応していない古い Safari では下の打ち消しが無視され、常に枠が出る */
       *:focus {
-        outline: 2px solid #0066CC !important;
-        outline-offset: 1px !important;
+        outline: 3px solid #1d4ed8;
+        outline-offset: 2px;
       }
-      
-      /* スキップリンク */
-      .skip-link {
-        position: absolute;
-        top: -40px;
-        left: 6px;
-        background: #000;
-        color: #fff;
-        padding: 8px 12px;
-        text-decoration: none;
-        z-index: 1000;
-        border-radius: 4px;
-        font-size: 14px;
-        font-weight: 600;
-      }
-      
-      .skip-link:focus {
-        top: 6px;
+
+      *:focus:not(:focus-visible) {
+        outline: none;
       }
       
       /* プリファースされたモーション設定の考慮 */
@@ -66,9 +53,6 @@
         <p>ブラウザの設定でJavaScriptを有効にする方法については、お使いのブラウザのヘルプをご確認ください。</p>
       </div>
     </noscript>
-    
-    <!-- スキップリンク -->
-    <a href="#main-content" class="skip-link">メインコンテンツにスキップ</a>
     
     <div id="root"></div>
   </body>

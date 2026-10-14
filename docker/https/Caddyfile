@@ -1,0 +1,29 @@
+# iPad から録音できるように HTTPS で配信する（docker-compose.yml の https）
+{
+	# 自分で作った証明書を使う（インターネットからは証明書を取らない）
+	local_certs
+	skip_install_trust
+	# 自動の「http → https」転送は使わない（下の http:// で証明書を配るため。転送先のポート番号も違う）
+	auto_https disable_redirects
+	# IP アドレスで開くとき、ブラウザは名前（SNI）を送らないので、どの証明書を使うかを決めておく
+	default_sni {$HOST_IP:127.0.0.1}
+}
+
+https://localhost, https://{$HOST_IP:127.0.0.1} {
+	tls internal
+	reverse_proxy web:80
+}
+
+# http://（パソコンの IP）:8081/ipad-cert.crt で、iPad に入れるルート証明書を配る。
+# それ以外は HTTPS へ案内する
+http:// {
+	handle /ipad-cert.crt {
+		root * /data/caddy/pki/authorities/local
+		rewrite * /root.crt
+		header Content-Type application/x-x509-ca-cert
+		file_server
+	}
+	handle {
+		redir https://{host}:{$HTTPS_PORT:8443}{uri}
+	}
+}

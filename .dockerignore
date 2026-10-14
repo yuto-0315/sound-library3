@@ -1,0 +1,25 @@
+# Docker のイメージに入れないもの
+.git
+node_modules
+build
+docs
+coverage
+playwright-report
+test-results
+history
+tests
+*.md
+*.pdf
+char-counts.txt
+.DS_Store
+.claude
+
+# 秘密の情報（本物の DB の接続情報・暗証番号・環境変数のファイル）
+api/config.php
+api/admin_pin.php
+.env
+.env.*
+
+# 共有された音（ボリュームに置く）
+api/uploads/audio/*
+!api/uploads/audio/.htaccess

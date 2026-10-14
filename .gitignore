@@ -54,3 +54,4 @@ blob-report/
 # Temporary files
 *.tmp
 *.temp
+backup/

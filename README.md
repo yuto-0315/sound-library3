@@ -87,6 +87,12 @@
 
 アクセシビリティのテストについては [TEST_DOCUMENTATION.md](TEST_DOCUMENTATION.md) の「アクセシビリティテスト」をご覧ください。
 
+## Docker で動かす（別のパソコンで使うとき）
+
+Docker Desktop を入れたパソコンなら、Windows は **`start-docker.bat` をダブルクリックするだけ**で、画面・API・データベースをまとめて起動できます（Mac は `start-docker.command`）。
+iPad から録音も使うときは `start-docker-https.bat`。止めるときは `stop-docker.bat`。
+手順・設定・データの保存・うまくいかないときは [DOCKER.md](DOCKER.md) を見てください。
+
 ## 開発環境のセットアップ
 
 ### 必要な環境
